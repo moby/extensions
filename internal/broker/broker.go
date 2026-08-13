@@ -258,8 +258,8 @@ func (b *Broker) Shutdown(ctx context.Context) error {
 	}
 	var hooks []hook
 	b.mu.RLock()
-	for i := len(b.initOrder) - 1; i >= 0; i-- {
-		state := b.extensions[b.initOrder[i]]
+	for _, v := range slices.Backward(b.initOrder) {
+		state := b.extensions[v]
 		if !state.initialized || state.extension.Shutdown == nil {
 			continue
 		}

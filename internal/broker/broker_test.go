@@ -173,18 +173,14 @@ func TestConcurrentAccess(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_ = b.Providers("a.point.v1")
 			_, _ = b.Provider("a.point.v1", "org.test.a.v1")
-		}()
+		})
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		_ = b.Register(extensions.New(extensions.Declaration{ID: "org.test.b.v1"}))
-	}()
+	})
 	wg.Wait()
 }
 

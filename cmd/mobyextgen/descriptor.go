@@ -49,10 +49,10 @@ func emitMessages(pt point) ([]byte, error) {
 // fileDescriptor builds the descriptor corresponding to [emitProto].
 func fileDescriptor(pt point) (*descriptorpb.FileDescriptorProto, error) {
 	fd := &descriptorpb.FileDescriptorProto{
-		Name:    proto.String(pt.protoPath),
-		Package: proto.String(pt.id),
-		Syntax:  proto.String("proto3"),
-		Options: &descriptorpb.FileOptions{GoPackage: proto.String(pt.protogenImport())},
+		Name:    new(pt.protoPath),
+		Package: new(pt.id),
+		Syntax:  new("proto3"),
+		Options: &descriptorpb.FileOptions{GoPackage: new(pt.protogenImport())},
 	}
 
 	for _, msg := range pt.messages {
@@ -65,16 +65,16 @@ func fileDescriptor(pt point) (*descriptorpb.FileDescriptorProto, error) {
 	// Bare-error methods still need response messages.
 	for _, m := range pt.methods {
 		if m.bareError {
-			fd.MessageType = append(fd.MessageType, &descriptorpb.DescriptorProto{Name: proto.String(m.response)})
+			fd.MessageType = append(fd.MessageType, &descriptorpb.DescriptorProto{Name: new(m.response)})
 		}
 	}
 
-	svc := &descriptorpb.ServiceDescriptorProto{Name: proto.String(pt.service)}
+	svc := &descriptorpb.ServiceDescriptorProto{Name: new(pt.service)}
 	for _, m := range pt.methods {
 		svc.Method = append(svc.Method, &descriptorpb.MethodDescriptorProto{
-			Name:       proto.String(m.name),
-			InputType:  proto.String("." + pt.id + "." + m.request),
-			OutputType: proto.String("." + pt.id + "." + m.response),
+			Name:       new(m.name),
+			InputType:  new("." + pt.id + "." + m.request),
+			OutputType: new("." + pt.id + "." + m.response),
 		})
 	}
 	fd.Service = []*descriptorpb.ServiceDescriptorProto{svc}
@@ -82,17 +82,17 @@ func fileDescriptor(pt point) (*descriptorpb.FileDescriptorProto, error) {
 }
 
 func messageDescriptor(pkg string, msg message) (*descriptorpb.DescriptorProto, error) {
-	d := &descriptorpb.DescriptorProto{Name: proto.String(msg.name)}
+	d := &descriptorpb.DescriptorProto{Name: new(msg.name)}
 	for _, n := range msg.reserved {
 		d.ReservedRange = append(d.ReservedRange, &descriptorpb.DescriptorProto_ReservedRange{
-			Start: proto.Int32(int32(n)), End: proto.Int32(int32(n) + 1),
+			Start: new(int32(n)), End: new(int32(n) + 1),
 		})
 	}
 	for _, f := range msg.fields {
 		fd := &descriptorpb.FieldDescriptorProto{
-			Name:     proto.String(f.protoName),
-			Number:   proto.Int32(int32(f.number)),
-			JsonName: proto.String(jsonName(f.protoName)),
+			Name:     new(f.protoName),
+			Number:   new(int32(f.number)),
+			JsonName: new(jsonName(f.protoName)),
 			Label:    descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
 		}
 		switch f.kind {
@@ -111,10 +111,10 @@ func messageDescriptor(pkg string, msg message) (*descriptorpb.DescriptorProto, 
 			fd.Label = descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum()
 		case messageSingle:
 			fd.Type = descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum()
-			fd.TypeName = proto.String("." + pkg + "." + f.protoType)
+			fd.TypeName = new("." + pkg + "." + f.protoType)
 		case messageRepeated:
 			fd.Type = descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum()
-			fd.TypeName = proto.String("." + pkg + "." + f.protoType)
+			fd.TypeName = new("." + pkg + "." + f.protoType)
 			fd.Label = descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum()
 		case scalarMap:
 			// A proto map is represented as a repeated nested entry message.
@@ -128,21 +128,21 @@ func messageDescriptor(pkg string, msg message) (*descriptorpb.DescriptorProto, 
 			}
 			entry := goCamelCase(f.protoName) + "Entry"
 			d.NestedType = append(d.NestedType, &descriptorpb.DescriptorProto{
-				Name:    proto.String(entry),
-				Options: &descriptorpb.MessageOptions{MapEntry: proto.Bool(true)},
+				Name:    new(entry),
+				Options: &descriptorpb.MessageOptions{MapEntry: new(true)},
 				Field: []*descriptorpb.FieldDescriptorProto{
 					{
-						Name: proto.String("key"), Number: proto.Int32(1), JsonName: proto.String("key"),
+						Name: new("key"), Number: proto.Int32(1), JsonName: new("key"),
 						Label: descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(), Type: key.Enum(),
 					},
 					{
-						Name: proto.String("value"), Number: proto.Int32(2), JsonName: proto.String("value"),
+						Name: new("value"), Number: proto.Int32(2), JsonName: new("value"),
 						Label: descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(), Type: val.Enum(),
 					},
 				},
 			})
 			fd.Type = descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum()
-			fd.TypeName = proto.String("." + pkg + "." + msg.name + "." + entry)
+			fd.TypeName = new("." + pkg + "." + msg.name + "." + entry)
 			fd.Label = descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum()
 		}
 		d.Field = append(d.Field, fd)

@@ -158,7 +158,7 @@ func file_internal_extensions_example_greeter_v0_greeter_proto_init() {
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
-			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
+			GoPackagePath: reflect.TypeFor[x]().PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_extensions_example_greeter_v0_greeter_proto_rawDesc), len(file_internal_extensions_example_greeter_v0_greeter_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   2,

@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/moby/extensions"
@@ -220,8 +221,8 @@ func closeLaunched(ctx context.Context, launched []*launcher.Launched) {
 // closeLaunchedErr stops processes in reverse launch order.
 func closeLaunchedErr(ctx context.Context, launched []*launcher.Launched) error {
 	var errs []error
-	for i := len(launched) - 1; i >= 0; i-- {
-		errs = append(errs, launched[i].Close(ctx))
+	for _, l := range slices.Backward(launched) {
+		errs = append(errs, l.Close(ctx))
 	}
 	return errors.Join(errs...)
 }

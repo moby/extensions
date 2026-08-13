@@ -26,8 +26,8 @@ func (r *recordRegistrar) RegisterService(desc *grpc.ServiceDesc, _ any) {
 
 func TestCollect(t *testing.T) {
 	r := testutils.StaticResolver{
-		{Extension: "a", Impl: svcProvider{name: "a.v1.Svc"}},
-		{Extension: "b", Impl: noopProvider{}},
+		testutils.Provide(Point, svcProvider{name: "a.v1.Svc"}),
+		testutils.Provide(Point, noopProvider{}),
 	}
 	services, err := Collect(r)
 	assert.NilError(t, err)

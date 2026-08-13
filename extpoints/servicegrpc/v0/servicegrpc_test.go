@@ -3,7 +3,7 @@ package servicegrpcv0
 import (
 	"testing"
 
-	"github.com/moby/extensions/extensionstest"
+	"github.com/moby/extensions/internal/testutils"
 	"google.golang.org/grpc"
 	"gotest.tools/v3/assert"
 )
@@ -25,7 +25,7 @@ func (r *recordRegistrar) RegisterService(desc *grpc.ServiceDesc, _ any) {
 }
 
 func TestCollect(t *testing.T) {
-	r := extensionstest.Resolver{
+	r := testutils.StaticResolver{
 		{Extension: "a", Impl: svcProvider{name: "a.v1.Svc"}},
 		{Extension: "b", Impl: noopProvider{}},
 	}

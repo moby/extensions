@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/moby/extensions"
+	"github.com/moby/extensions/internal/extensiondecl"
 	"github.com/moby/extensions/sdk"
 	"github.com/moby/extensions/sdk/sdkapi"
 	sdkapipb "github.com/moby/extensions/sdk/sdkapi/protogen"
@@ -156,36 +157,24 @@ func (l Launcher) Launch(ctx context.Context, bin string) (*Launched, error) {
 		stop()
 		return nil, fmt.Errorf("describe extension %q: %w", name, err)
 	}
-	decl := resp.Declaration
-	if decl == nil || decl.ID == "" {
-		_ = conn.Close()
-		stop()
-		return nil, fmt.Errorf("extension %q described no extension", name)
-	}
-	if decl.ID != name {
-		_ = conn.Close()
-		stop()
-		return nil, fmt.Errorf("extension %q declared id %q, which must match its file name", name, decl.ID)
-	}
-	launched := &Launched{
-		ID:               extensions.ExtensionID(decl.ID),
-		Dependencies:     declaredDependencies(decl.Dependencies),
-		Conflicts:        declaredConflicts(decl.Conflicts),
-		ProviderServices: declaredServices(decl.ProviderServices),
-		Conn:             conn,
-		shutdown:         &processShutdown{conn: conn, cmd: cmd, wait: wait, timeout: shutdownTimeout, lifetime: lifetime},
-	}
-	for _, p := range decl.Providers {
-		launched.Points = append(launched.Points, LaunchedPoint{
-			ID: extensions.PointID(p.ID),
-		})
-	}
-	// Require service inventories to belong to declared provider points. This
-	// keeps socket exposure behind the point's explicit opt-in.
-	if err := validateDeclaredServices(name, launched); err != nil {
+	decl, err := extensiondecl.Parse(name, resp.Declaration)
+	if err != nil {
 		_ = conn.Close()
 		stop()
 		return nil, err
+	}
+	launched := &Launched{
+		ID:               decl.ID,
+		Dependencies:     decl.Dependencies,
+		Conflicts:        decl.Conflicts,
+		ProviderServices: decl.ProviderServices,
+		Conn:             conn,
+		shutdown:         &processShutdown{conn: conn, cmd: cmd, wait: wait, timeout: shutdownTimeout, lifetime: lifetime},
+	}
+	for _, point := range decl.Points {
+		launched.Points = append(launched.Points, LaunchedPoint{
+			ID: point,
+		})
 	}
 	return launched, nil
 }

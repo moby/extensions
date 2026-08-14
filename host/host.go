@@ -46,10 +46,18 @@ type Host struct {
 	broker *broker.Broker
 	// conns holds connections to launched extensions for socket proxying.
 	conns map[extensions.ExtensionID]grpc.ClientConnInterface
-	// launched holds out-of-process extensions in launch order.
-	launched []*launcher.Launched
+	// loaded owns the resources acquired for installed extensions in load order.
+	loaded []loadedExtension
+	// processServices indexes service publication metadata from launched
+	// extensions separately from their runtime ownership.
+	processServices map[extensions.ExtensionID]map[extensions.PointID][]string
 	// callback serves launched extensions' declared dependencies.
 	callback *grpc.Server
+}
+
+type loadedExtension struct {
+	extension extensions.Extension
+	close     func(context.Context) error
 }
 
 // Conn returns the gRPC connection to a launched extension.
@@ -62,9 +70,9 @@ func (h *Host) Conn(extension extensions.ExtensionID) (grpc.ClientConnInterface,
 // point. In-process services are registered on the daemon's gRPC server.
 func (h *Host) ServicesForPoint(point extensions.PointID) map[extensions.ExtensionID][]string {
 	out := make(map[extensions.ExtensionID][]string)
-	for _, l := range h.launched {
-		if len(l.ProviderServices[point]) > 0 {
-			out[l.ID] = l.ProviderServices[point]
+	for id, services := range h.processServices {
+		if len(services[point]) > 0 {
+			out[id] = services[point]
 		}
 	}
 	return out
@@ -83,14 +91,15 @@ func New(ctx context.Context, opts Options) (_ *Host, retErr error) {
 	}
 	b := broker.New()
 	conns := make(map[extensions.ExtensionID]grpc.ClientConnInterface)
-	var launched []*launcher.Launched
+	var loaded []loadedExtension
+	processServices := make(map[extensions.ExtensionID]map[extensions.PointID][]string)
 	var callback *grpc.Server
 	// The broker only shuts down initialized extensions, so construction failures
-	// also explicitly close launched processes.
+	// also explicitly close loaded resources.
 	defer func() {
 		if retErr != nil {
 			_ = b.Shutdown(context.Background())
-			closeLaunched(context.Background(), launched)
+			closeLoaded(context.Background(), loaded)
 			if callback != nil {
 				callback.Stop()
 			}
@@ -119,16 +128,13 @@ func New(ctx context.Context, opts Options) (_ *Host, retErr error) {
 			return nil, err
 		}
 		for _, bin := range bins {
-			started, err := l.Launch(ctx, bin)
+			loadedExt, started, err := loadProcess(ctx, l, bin, providers, exposeOnly)
 			if err != nil {
 				return nil, err
 			}
-			launched = append(launched, started)
-			ext, err := extensionFromLaunched(started, providers, exposeOnly)
-			if err != nil {
-				return nil, err
-			}
-			if err := b.Register(ext); err != nil {
+			loaded = append(loaded, loadedExt)
+			processServices[started.ID] = started.ProviderServices
+			if err := b.Register(loadedExt.extension); err != nil {
 				return nil, err
 			}
 			conns[started.ID] = started.Conn
@@ -162,7 +168,7 @@ func New(ctx context.Context, opts Options) (_ *Host, retErr error) {
 	if err := b.Init(ctx, opts.ExtensionConfig); err != nil {
 		return nil, err
 	}
-	return &Host{broker: b, conns: conns, launched: launched, callback: callback}, nil
+	return &Host{broker: b, conns: conns, loaded: loaded, processServices: processServices, callback: callback}, nil
 }
 
 // serveCallback starts the server for launched extensions' declared
@@ -202,29 +208,53 @@ func (h *Host) Providers(point extensions.PointID) []extensions.ResolvedProvider
 	return h.broker.Providers(point)
 }
 
-// Shutdown stops extensions in reverse dependency order, then closes any
-// process not reached by the broker and the dependency callback server.
+// Shutdown stops extensions in reverse dependency order, then closes every
+// loaded resource and the dependency callback server.
 func (h *Host) Shutdown(ctx context.Context) error {
 	err := h.broker.Shutdown(ctx)
-	err = errors.Join(err, closeLaunchedErr(ctx, h.launched))
+	err = errors.Join(err, closeLoadedErr(ctx, h.loaded))
 	if h.callback != nil {
 		h.callback.Stop()
 	}
 	return err
 }
 
-// closeLaunched is best-effort teardown for failed host construction.
-func closeLaunched(ctx context.Context, launched []*launcher.Launched) {
-	_ = closeLaunchedErr(ctx, launched)
+// closeLoaded is best-effort teardown for failed host construction.
+func closeLoaded(ctx context.Context, loaded []loadedExtension) {
+	_ = closeLoadedErr(ctx, loaded)
 }
 
-// closeLaunchedErr stops processes in reverse launch order.
-func closeLaunchedErr(ctx context.Context, launched []*launcher.Launched) error {
+// closeLoadedErr closes resources in reverse load order.
+func closeLoadedErr(ctx context.Context, loaded []loadedExtension) error {
 	var errs []error
-	for _, l := range slices.Backward(launched) {
-		errs = append(errs, l.Close(ctx))
+	for _, l := range slices.Backward(loaded) {
+		errs = append(errs, l.close(ctx))
 	}
 	return errors.Join(errs...)
+}
+
+// loadProcess launches and adapts one out-of-process extension. The launched
+// process remains guarded until the loaded resource is returned to its owner.
+func loadProcess(ctx context.Context, l launcher.Launcher, bin string, providers map[extensions.PointID]clientpoint.Provider, exposeOnly map[extensions.PointID]bool) (loadedExtension, *launcher.Launched, error) {
+	launched, err := l.Launch(ctx, bin)
+	if err != nil {
+		return loadedExtension{}, nil, err
+	}
+
+	owned := true
+	defer func() {
+		if owned {
+			_ = launched.Close(context.Background())
+		}
+	}()
+
+	ext, err := extensionFromLaunched(launched, providers, exposeOnly)
+	if err != nil {
+		return loadedExtension{}, nil, err
+	}
+	loaded := loadedExtension{extension: ext, close: launched.Close}
+	owned = false
+	return loaded, launched, nil
 }
 
 // clientProviderMap indexes registrations by point id.

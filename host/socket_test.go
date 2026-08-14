@@ -48,8 +48,12 @@ func TestSocketExposure(t *testing.T) {
 	assert.NilError(t, err)
 	defer func() { assert.NilError(t, h.Shutdown(context.Background())) }()
 
+	services := h.ServicesForPoint(servicegrpcv0.Point.ID())
+	assert.DeepEqual(t, services, map[extensions.ExtensionID][]string{
+		greeter.ID: {"org.mobyproject.extension.example.greeter.v0.Greeter"},
+	})
 	routes := map[string]grpc.ClientConnInterface{}
-	for ext, names := range h.ServicesForPoint(servicegrpcv0.Point.ID()) {
+	for ext, names := range services {
 		conn, ok := h.Conn(ext)
 		assert.Check(t, ok, "no connection for extension %q", ext)
 		for _, name := range names {

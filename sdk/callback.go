@@ -6,7 +6,7 @@ import (
 	"net"
 
 	"github.com/moby/extensions"
-	"github.com/moby/extensions/clientpoint"
+	"github.com/moby/extensions/sdk/internal/dependencyresolver"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -25,35 +25,5 @@ func (s *Server) resolver() (extensions.Resolver, error) {
 		}
 		s.callbackConn = conn
 	}
-	return &callbackResolver{conn: s.callbackConn, clients: s.depends}, nil
-}
-
-// callbackResolver resolves declared dependencies through the daemon callback.
-type callbackResolver struct {
-	conn    grpc.ClientConnInterface
-	clients map[extensions.PointID]clientpoint.Provider
-}
-
-// provider builds a caller for the daemon's provider of point. The callback
-// serves one provider per point.
-func (r *callbackResolver) provider(point extensions.PointID) (any, error) {
-	build, ok := r.clients[point]
-	if !ok || r.conn == nil {
-		return nil, fmt.Errorf("extension has no resolvable dependency for point %q (declare it with Depends)", point)
-	}
-	return build(r.conn).Impl, nil
-}
-
-func (r *callbackResolver) Provider(point extensions.PointID, _ extensions.ExtensionID) (any, error) {
-	// Named selection uses the callback's single provider; by-id selection is not
-	// available across the process boundary.
-	return r.provider(point)
-}
-
-func (r *callbackResolver) Providers(point extensions.PointID) []extensions.ResolvedProvider {
-	impl, err := r.provider(point)
-	if err != nil {
-		return nil
-	}
-	return []extensions.ResolvedProvider{{Impl: impl}}
+	return dependencyresolver.New(s.callbackConn, s.depends), nil
 }

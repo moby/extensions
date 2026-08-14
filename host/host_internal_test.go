@@ -80,7 +80,7 @@ func assertProcessReleased(t *testing.T, probeFile string) {
 	assert.NilError(t, listener.Close())
 }
 
-func TestExtensionFromLaunchedRejectsUnsupportedPoints(t *testing.T) {
+func TestExtensionFromHostedRejectsUnsupportedPoints(t *testing.T) {
 	const supported = extensions.PointID("org.mobyproject.extension.supported.v1")
 	const unsupported = extensions.PointID("org.example.own.api.v1")
 
@@ -90,26 +90,64 @@ func TestExtensionFromLaunchedRejectsUnsupportedPoints(t *testing.T) {
 		},
 	}
 
-	ext, err := extensionFromLaunched(&launcher.Launched{
-		ID:     "org.example.ext.v1",
-		Points: []launcher.LaunchedPoint{{ID: supported}},
+	ext, err := extensionFromHosted(hostedExtension{
+		id:     "org.example.ext.v1",
+		points: []extensions.PointID{supported},
 	}, providers, nil)
 	assert.NilError(t, err)
 	assert.Equal(t, len(ext.Declaration().Providers), 1)
 
-	_, err = extensionFromLaunched(&launcher.Launched{
-		ID:     "org.example.ext.v1",
-		Points: []launcher.LaunchedPoint{{ID: supported}, {ID: unsupported}},
+	_, err = extensionFromHosted(hostedExtension{
+		id:     "org.example.ext.v1",
+		points: []extensions.PointID{supported, unsupported},
 	}, providers, nil)
 	assert.ErrorContains(t, err, "unsupported point")
 	assert.ErrorContains(t, err, string(unsupported))
 
-	ext, err = extensionFromLaunched(&launcher.Launched{
-		ID:     "org.example.ext.v1",
-		Points: []launcher.LaunchedPoint{{ID: supported}, {ID: unsupported}},
+	ext, err = extensionFromHosted(hostedExtension{
+		id:     "org.example.ext.v1",
+		points: []extensions.PointID{supported, unsupported},
 	}, providers, map[extensions.PointID]bool{unsupported: true})
 	assert.NilError(t, err)
 	assert.Equal(t, len(ext.Declaration().Providers), 1)
+}
+
+func TestExtensionFromHostedForwardsBrokerConfig(t *testing.T) {
+	const id = extensions.ExtensionID("org.example.hosted.v1")
+	want := extensions.Config{"message": "configured"}
+	var got extensions.Config
+	ext, err := extensionFromHosted(hostedExtension{
+		id: id,
+		initialize: func(_ context.Context, config extensions.Config) error {
+			got = config
+			return nil
+		},
+	}, nil, nil)
+	assert.NilError(t, err)
+
+	b := broker.New()
+	assert.NilError(t, b.Register(ext))
+	assert.NilError(t, b.Init(context.Background(), map[extensions.ExtensionID]extensions.Config{id: want}))
+	assert.DeepEqual(t, got, want)
+}
+
+func TestExtensionFromHostedRunsSemanticShutdown(t *testing.T) {
+	shutdown := false
+	ext, err := extensionFromHosted(hostedExtension{
+		id:         "org.example.hosted.v1",
+		initialize: func(context.Context, extensions.Config) error { return nil },
+		shutdown: func(context.Context) error {
+			shutdown = true
+			return nil
+		},
+	}, nil, nil)
+	assert.NilError(t, err)
+
+	b := broker.New()
+	assert.NilError(t, b.Register(ext))
+	assert.NilError(t, b.Init(context.Background(), nil))
+	assert.NilError(t, b.Shutdown(context.Background()))
+	assert.Assert(t, shutdown, "the broker did not run hosted semantic shutdown")
 }
 
 func TestClientProviderMap(t *testing.T) {
@@ -238,10 +276,11 @@ func TestLaunchedExtensionCarriesShutdown(t *testing.T) {
 		},
 	}
 
-	ext, err := extensionFromLaunched(&launcher.Launched{
+	hosted := hostedExtensionFromLaunched(&launcher.Launched{
 		ID:     "org.example.ext.v1",
 		Points: []launcher.LaunchedPoint{{ID: point}},
-	}, providers, nil)
+	})
+	ext, err := extensionFromHosted(hosted, providers, nil)
 	assert.NilError(t, err)
 	assert.Assert(t, ext.Declaration().Shutdown != nil,
 		"a launched extension must declare a Shutdown so the broker stops it in dependency order")

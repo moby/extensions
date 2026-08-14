@@ -60,6 +60,18 @@ type loadedExtension struct {
 	close     func(context.Context) error
 }
 
+// hostedExtension is the runtime-neutral declaration and lifecycle surface
+// needed to adapt an externally hosted extension to the broker.
+type hostedExtension struct {
+	id           extensions.ExtensionID
+	dependencies []extensions.Dependency
+	conflicts    []extensions.ExtensionID
+	points       []extensions.PointID
+	conn         grpc.ClientConnInterface
+	initialize   func(context.Context, extensions.Config) error
+	shutdown     func(context.Context) error
+}
+
 // Conn returns the gRPC connection to a launched extension.
 func (h *Host) Conn(extension extensions.ExtensionID) (grpc.ClientConnInterface, bool) {
 	conn, ok := h.conns[extension]
@@ -233,8 +245,9 @@ func closeLoadedErr(ctx context.Context, loaded []loadedExtension) error {
 	return errors.Join(errs...)
 }
 
-// loadProcess launches and adapts one out-of-process extension. The launched
-// process remains guarded until the loaded resource is returned to its owner.
+// loadProcess launches and adapts one out-of-process extension.
+// The launched process remains guarded until the loaded resource is returned to
+// its owner.
 func loadProcess(ctx context.Context, l launcher.Launcher, bin string, providers map[extensions.PointID]clientpoint.Provider, exposeOnly map[extensions.PointID]bool) (loadedExtension, *launcher.Launched, error) {
 	launched, err := l.Launch(ctx, bin)
 	if err != nil {
@@ -248,7 +261,8 @@ func loadProcess(ctx context.Context, l launcher.Launcher, bin string, providers
 		}
 	}()
 
-	ext, err := extensionFromLaunched(launched, providers, exposeOnly)
+	hosted := hostedExtensionFromLaunched(launched)
+	ext, err := extensionFromHosted(hosted, providers, exposeOnly)
 	if err != nil {
 		return loadedExtension{}, nil, err
 	}
@@ -269,33 +283,53 @@ func clientProviderMap(regs []clientpoint.Registration) (map[extensions.PointID]
 	return m, nil
 }
 
-// extensionFromLaunched builds a declaration and client providers from a
-// launched extension's handshake data.
-func extensionFromLaunched(launched *launcher.Launched, providers map[extensions.PointID]clientpoint.Provider, exposeOnly map[extensions.PointID]bool) (extensions.Extension, error) {
-	decl := extensions.Declaration{
-		ID:           launched.ID,
-		Dependencies: launched.Dependencies,
-		Conflicts:    launched.Conflicts,
-		// The broker drives the RPC in dependency order. Configuration arrived in
-		// the launch handshake, so the broker's config argument is ignored.
-		Init: func(ctx context.Context, _ extensions.Config, _ extensions.Resolver) error {
+// hostedExtensionFromLaunched adapts process declaration and lifecycle fields to
+// the runtime-neutral hosted extension contract.
+func hostedExtensionFromLaunched(launched *launcher.Launched) hostedExtension {
+	points := make([]extensions.PointID, 0, len(launched.Points))
+	for _, point := range launched.Points {
+		points = append(points, point.ID)
+	}
+	return hostedExtension{
+		id:           launched.ID,
+		dependencies: launched.Dependencies,
+		conflicts:    launched.Conflicts,
+		points:       points,
+		conn:         launched.Conn,
+		// Configuration already arrived in the process launch handshake, so the
+		// broker's configuration is intentionally ignored.
+		initialize: func(ctx context.Context, _ extensions.Config) error {
 			return launched.Initialize(ctx)
 		},
-		// Let the broker stop the process in reverse dependency order, keeping its
-		// dependencies alive until its Shutdown hook has run.
-		Shutdown: launched.Close,
+		shutdown: launched.Close,
 	}
-	for _, p := range launched.Points {
-		if exposeOnly[p.ID] {
+}
+
+// extensionFromHosted builds a declaration and client providers from one
+// runtime-neutral hosted extension.
+func extensionFromHosted(hosted hostedExtension, providers map[extensions.PointID]clientpoint.Provider, exposeOnly map[extensions.PointID]bool) (extensions.Extension, error) {
+	decl := extensions.Declaration{
+		ID:           hosted.id,
+		Dependencies: hosted.dependencies,
+		Conflicts:    hosted.conflicts,
+		Init: func(ctx context.Context, config extensions.Config, _ extensions.Resolver) error {
+			return hosted.initialize(ctx, config)
+		},
+		// Let the broker stop the extension in reverse dependency order, keeping
+		// its dependencies alive until its Shutdown hook has run.
+		Shutdown: hosted.shutdown,
+	}
+	for _, point := range hosted.points {
+		if exposeOnly[point] {
 			// Expose-only points are published, not called in-daemon.
 			continue
 		}
-		build, ok := providers[p.ID]
+		build, ok := providers[point]
 		if !ok {
 			// The daemon cannot call an unlisted point.
-			return nil, fmt.Errorf("extension %q declares unsupported point %q", launched.ID, p.ID)
+			return nil, fmt.Errorf("extension %q declares unsupported point %q", hosted.id, point)
 		}
-		provider := build(launched.Conn)
+		provider := build(hosted.conn)
 		decl.Providers = append(decl.Providers, provider)
 	}
 	return extensions.New(decl), nil

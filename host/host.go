@@ -188,16 +188,8 @@ func New(ctx context.Context, opts Options) (_ *Host, retErr error) {
 // provider per point.
 func serveCallback(endpoint string, deps []serverpoint.Registration, b *broker.Broker) (*grpc.Server, error) {
 	srv := grpc.NewServer()
-	for _, dep := range deps {
-		providers := b.Providers(dep.Point)
-		switch len(providers) {
-		case 0:
-			continue
-		case 1:
-			dep.Register(srv, providers[0].Impl)
-		default:
-			return nil, fmt.Errorf("dependency point %q offered on the callback has %d providers; exactly one is required", dep.Point, len(providers))
-		}
+	if err := registerDependencyProviders(srv, deps, b); err != nil {
+		return nil, err
 	}
 	if err := os.Remove(endpoint); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("remove stale dependency callback socket: %w", err)
@@ -208,6 +200,23 @@ func serveCallback(endpoint string, deps []serverpoint.Registration, b *broker.B
 	}
 	go srv.Serve(lis)
 	return srv, nil
+}
+
+// registerDependencyProviders applies the callback's single-provider policy to
+// any gRPC service registrar.
+func registerDependencyProviders(registrar grpc.ServiceRegistrar, deps []serverpoint.Registration, b *broker.Broker) error {
+	for _, dep := range deps {
+		providers := b.Providers(dep.Point)
+		switch len(providers) {
+		case 0:
+			continue
+		case 1:
+			dep.Register(registrar, providers[0].Impl)
+		default:
+			return fmt.Errorf("dependency point %q offered on the callback has %d providers; exactly one is required", dep.Point, len(providers))
+		}
+	}
+	return nil
 }
 
 // Provider returns one provider for point implemented by extension.

@@ -14,14 +14,54 @@ import (
 	"github.com/moby/extensions"
 )
 
-// Binaries lists executable extensions directly under dir. Each is named after
-// its file, without .exe on Windows. A missing directory yields no binaries.
+// Binaries lists executable extensions directly under dir.
+// Each is named after its file, without .exe on Windows.
+// A missing directory yields no binaries.
 //
-// Discovery is a root-code-execution boundary. World-writable entries, entries
-// owned by an untrusted user, and files without valid extension ids are skipped.
+// Discovery is a root-code-execution boundary.
+// World-writable entries, entries owned by an untrusted user, and files without
+// valid extension ids are skipped.
 // Other trust decisions, including group policy and symlinks, belong to the
 // operator.
 func Binaries(ctx context.Context, dir string) ([]string, error) {
+	entries, err := extensionEntries(ctx, dir)
+	if err != nil || entries == nil {
+		return nil, err
+	}
+	var bins []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil, fmt.Errorf("stat extension %q: %w", filepath.Join(dir, entry.Name()), err)
+		}
+		if !isExecutable(info) {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		// The file name is the extension id. Validate it before launching so a
+		// shared directory cannot execute arbitrary helper binaries.
+		name := extensionName(entry.Name())
+		if err := extensions.ValidateExtensionID(extensions.ExtensionID(name)); err != nil {
+			log.G(ctx).WithError(err).Warnf("extensions: skipping %q: not a valid extension binary name", path)
+			continue
+		}
+		if worldWritable(info) {
+			log.G(ctx).Warnf("extensions: refusing to run world-writable extension binary %q", path)
+			continue
+		}
+		if uid, untrusted := untrustedOwner(info); untrusted {
+			log.G(ctx).Warnf("extensions: refusing to run extension binary %q owned by untrusted uid %d", path, uid)
+			continue
+		}
+		bins = append(bins, path)
+	}
+	return bins, nil
+}
+
+func extensionEntries(ctx context.Context, dir string) ([]os.DirEntry, error) {
 	dirInfo, err := os.Stat(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -41,37 +81,7 @@ func Binaries(ctx context.Context, dir string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read extension dir %q: %w", dir, err)
 	}
-	var bins []string
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil {
-			return nil, fmt.Errorf("stat extension %q: %w", filepath.Join(dir, e.Name()), err)
-		}
-		if !isExecutable(info) {
-			continue
-		}
-		path := filepath.Join(dir, e.Name())
-		// The file name is the extension id. Validate it before launching so a
-		// shared directory cannot execute arbitrary helper binaries.
-		name := extensionName(e.Name())
-		if err := extensions.ValidateExtensionID(extensions.ExtensionID(name)); err != nil {
-			log.G(ctx).WithError(err).Warnf("extensions: skipping %q: not a valid extension binary name", path)
-			continue
-		}
-		if worldWritable(info) {
-			log.G(ctx).Warnf("extensions: refusing to run world-writable extension binary %q", path)
-			continue
-		}
-		if uid, untrusted := untrustedOwner(info); untrusted {
-			log.G(ctx).Warnf("extensions: refusing to run extension binary %q owned by untrusted uid %d", path, uid)
-			continue
-		}
-		bins = append(bins, path)
-	}
-	return bins, nil
+	return entries, nil
 }
 
 // untrustedOwner reports whether info is owned by a uid that is neither the

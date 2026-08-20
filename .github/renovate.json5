@@ -1,0 +1,28 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigestsToSemver",
+    "helpers:githubDigestChangelogs"
+  ],
+  "minimumReleaseAge": "3 days",
+  "customManagers": [
+    {
+      "description": "Track Go lint tools used by CI",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
+      "matchStrings": [
+        "renovate: depName=(?<depName>[^\\s]+)\\s+run: go run [^@\\s]+@(?<currentValue>v?\\d+\\.\\d+\\.\\d+)"
+      ],
+      "datasourceTemplate": "go"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Group safe routine updates",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "groupName": "routine dependency updates"
+    }
+  ],
+  "postUpdateOptions": ["gomodTidy"]
+}

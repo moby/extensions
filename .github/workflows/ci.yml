@@ -48,6 +48,31 @@ jobs:
         run: |
           go vet ./...
 
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      -
+        name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      -
+        name: Actionlint
+        # renovate: depName=github.com/rhysd/actionlint
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      -
+        name: Modernize
+        # renovate: depName=golang.org/x/tools/gopls
+        run: go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@v0.23.0 ./...
+      -
+        name: GolangCI-Lint
+        # renovate: depName=github.com/golangci/golangci-lint/v2
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run ./...
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -64,3 +89,21 @@ jobs:
         name: Test
         run: |
           go test -race ./...
+
+  success:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs:
+      - validate
+      - lint
+      - test
+    if: always()
+    steps:
+      -
+        name: Check CI result
+        run: |
+          for result in ${{ join(needs.*.result, ' ') }}; do
+            if [[ "$result" != "success" ]]; then
+              exit 1
+            fi
+          done

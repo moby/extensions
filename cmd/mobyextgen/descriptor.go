@@ -179,7 +179,7 @@ func scalarDescriptorType(protoType string) (descriptorpb.FieldDescriptorProto_T
 func jsonName(protoName string) string {
 	var b []byte
 	upper := false
-	for i := 0; i < len(protoName); i++ {
+	for i := range len(protoName) {
 		c := protoName[i]
 		if c == '_' {
 			upper = true

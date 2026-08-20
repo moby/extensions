@@ -30,7 +30,7 @@ func (s *Server) ListenWithIO(ctx context.Context, stdin io.Reader, stdout io.Wr
 	if err != nil {
 		return fmt.Errorf("listen on extension socket: %w", err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 
 	s.config = cfg.Config
 	s.callbackEndpoint = cfg.CallbackEndpoint

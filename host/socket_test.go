@@ -66,12 +66,12 @@ func TestSocketExposure(t *testing.T) {
 	lis, err := net.Listen("unix", sock)
 	assert.NilError(t, err)
 	proxy := grpcproxy.New(routes)
-	go proxy.Serve(lis)
+	go func() { _ = proxy.Serve(lis) }()
 	defer proxy.Stop()
 
 	conn, err := grpc.NewClient("unix:"+sock, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	assert.NilError(t, err)
-	defer conn.Close()
+	defer func() { assert.NilError(t, conn.Close()) }()
 
 	resp, err := greeterpb.NewGreeterClient(conn).Greet(ctx, &greeterpb.HelloRequest{Name: "world"})
 	assert.NilError(t, err)
@@ -136,12 +136,12 @@ func TestInProcessServiceExposure(t *testing.T) {
 	sock := filepath.Join(shortTempDir(t), "api.sock")
 	lis, err := net.Listen("unix", sock)
 	assert.NilError(t, err)
-	go srv.Serve(lis)
+	go func() { _ = srv.Serve(lis) }()
 	defer srv.Stop()
 
 	conn, err := grpc.NewClient("unix:"+sock, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	assert.NilError(t, err)
-	defer conn.Close()
+	defer func() { assert.NilError(t, conn.Close()) }()
 
 	resp, err := greeterpb.NewGreeterClient(conn).Greet(ctx, &greeterpb.HelloRequest{Name: "world"})
 	assert.NilError(t, err)

@@ -55,12 +55,12 @@ func TestProxyServerStreaming(t *testing.T) {
 	proxySock := filepath.Join(shortTempDir(t), "proxy.sock")
 	lis, err := net.Listen("unix", proxySock)
 	assert.NilError(t, err)
-	go proxy.Serve(lis)
+	go func() { _ = proxy.Serve(lis) }()
 	defer proxy.Stop()
 
 	clientConn, err := grpc.NewClient("unix:"+proxySock, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	assert.NilError(t, err)
-	defer clientConn.Close()
+	defer func() { assert.NilError(t, clientConn.Close()) }()
 
 	stream, err := clientConn.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true}, "/test.Streamer/Count")
 	assert.NilError(t, err)
@@ -145,7 +145,9 @@ var metaDesc = grpc.ServiceDesc{
 				return nil, err
 			}
 			_ = grpc.SetHeader(ctx, metadata.Pairs("x-head", "H"))
-			grpc.SetTrailer(ctx, metadata.Pairs("x-trail", "T"))
+			if err := grpc.SetTrailer(ctx, metadata.Pairs("x-trail", "T")); err != nil {
+				return nil, err
+			}
 			return wrapperspb.String("ok"), nil
 		},
 	}},
@@ -218,12 +220,12 @@ func startProxy(t *testing.T, service string, register func(*grpc.Server)) *grpc
 	proxySock := filepath.Join(shortTempDir(t), "proxy.sock")
 	lis, err := net.Listen("unix", proxySock)
 	assert.NilError(t, err)
-	go proxy.Serve(lis)
+	go func() { _ = proxy.Serve(lis) }()
 	t.Cleanup(proxy.Stop)
 
 	clientConn, err := grpc.NewClient("unix:"+proxySock, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	assert.NilError(t, err)
-	t.Cleanup(func() { clientConn.Close() })
+	t.Cleanup(func() { assert.NilError(t, clientConn.Close()) })
 	return clientConn
 }
 
@@ -233,12 +235,12 @@ func serve(t *testing.T, sock string, register func(*grpc.Server)) grpc.ClientCo
 	register(s)
 	lis, err := net.Listen("unix", sock)
 	assert.NilError(t, err)
-	go s.Serve(lis)
+	go func() { _ = s.Serve(lis) }()
 	t.Cleanup(s.Stop)
 
 	conn, err := grpc.NewClient("unix:"+sock, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	assert.NilError(t, err)
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { assert.NilError(t, conn.Close()) })
 	return conn
 }
 

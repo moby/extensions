@@ -138,7 +138,7 @@ func TestListenDeliversConfig(t *testing.T) {
 			return (&net.Dialer{}).DialContext(c, "unix", endpoint)
 		}))
 	assert.NilError(t, err)
-	defer conn.Close()
+	defer func() { assert.NilError(t, conn.Close()) }()
 
 	_, err = sdkapipb.NewClient(conn).Initialize(ctx, &sdkapi.InitializeRequest{})
 	assert.NilError(t, err)

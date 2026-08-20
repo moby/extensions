@@ -198,7 +198,7 @@ func serveCallback(endpoint string, deps []serverpoint.Registration, b *broker.B
 	if err != nil {
 		return nil, fmt.Errorf("listen on dependency callback socket: %w", err)
 	}
-	go srv.Serve(lis)
+	go func() { _ = srv.Serve(lis) }()
 	return srv, nil
 }
 

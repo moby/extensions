@@ -31,5 +31,5 @@ func main() {
 			servicev0.Offer(echov1.Point),
 		},
 	})
-	sdk.Main(ext, echopb.ServerPoint)
+	sdk.Main(ext, sdk.WithServerPoints(echopb.ServerPoint))
 }

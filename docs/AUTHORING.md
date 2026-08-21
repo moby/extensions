@@ -326,11 +326,12 @@ Their config is delivered by id through `host.Options.ExtensionConfig`.
 
 ### Run out-of-process
 
-Write a `main` that builds an SDK server, registers the extension, and passes a generated `ServerPoint` for each point it provides:
+Write a `main` that builds an SDK server, registers the extension, and passes a
+generated `ServerPoint` for each Point through `WithServerPoints`:
 
 ```go
 func main() {
-	sdk.Main(myext.Extension, mypointpb.ServerPoint)
+	sdk.Main(myext.Extension, sdk.WithServerPoints(mypointpb.ServerPoint))
 }
 ```
 
@@ -376,4 +377,4 @@ Health checks, reconnect, and restart are future work in [ROADMAP.md](./ROADMAP.
 | Support a binary | `daemon/extensions.go` → `clientProviders()` | add `<name>pb.ClientPoint` |
 | Write an extension | anywhere | `extensions.New(Declaration{…})` or `Extension` |
 | Run it built-in | `daemon/extensions.go` → `builtinExtensions()` | append the extension value |
-| Run it as a binary | `cmd/<name>/main.go` | `sdk.Main(ext, <name>pb.ServerPoint)` |
+| Run it as a binary | `cmd/<name>/main.go` | `sdk.Main(ext, sdk.WithServerPoints(<name>pb.ServerPoint))` |

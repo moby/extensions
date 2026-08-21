@@ -9,5 +9,5 @@ import (
 )
 
 func main() {
-	sdk.Main(greeter.Extension, servicegrpcv0.ServerPoint)
+	sdk.Main(greeter.Extension, sdk.WithServerPoints(servicegrpcv0.ServerPoint))
 }

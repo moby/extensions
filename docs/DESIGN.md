@@ -42,8 +42,9 @@ These names are distinct:
   Socket routing uses the full service name, never the bare point id.
 - **CLI / API route** is a separate client-facing name, such as `docker compose up` or a REST path; the framework does not generate it.
 
-Publishing a point id means publishing the gRPC services in its proto package.
-Socket exposure takes service names, not point ids.
+Publishing a point id means publishing the generated gRPC service in its proto
+package. Socket routing takes the full service name. `servicev0.Point` carries
+the extension's offers, while Host policy makes the final publication decision.
 
 ## Resolution, ordering, and lifecycle
 
@@ -88,19 +89,69 @@ Shutdown runs in reverse dependency order and tears down only initialized extens
 A launch or initialization failure unwinds started processes and initialized extensions; loading is all-or-nothing, not degraded.
 Errors are attributed to the extension that produced them.
 
-## Socket exposure
+## Socket publication
 
-An extension is reachable only through daemon-internal calls unless it provides `org.mobyproject.extension.service.grpc.v0`.
-This point takes a `grpc.ServiceRegistrar`, so it is resolved locally rather than sent over the wire.
-It publishes an extension's own gRPC services on `docker.sock` without requiring the daemon to import that extension's proto.
+An extension is reachable through daemon-internal point calls, or through the
+generated gRPC service of an ordinary Point that it explicitly publishes.
+Publication does not require the daemon to import the extension's proto.
+Arbitrary raw gRPC publication is not supported.
 
-- In-process, the daemon registers the services on its gRPC server beside built-ins such as BuildKit.
-- Out-of-process, the SDK registers them on the extension server and reports their fully qualified names.
-  The daemon proxies matching calls by name and forwards the raw gRPC stream, including metadata and status.
+### Generated Point publication
 
-Service names are captured from registration, not listed manually.
-The extension must declare the service-exposure point as a provider before publishing its service inventory.
-A name cannot collide with another extension or a service already served by the daemon; collision fails startup rather than shadowing the existing service.
+The source is an ordinary `extensions.DefinePoint` or
+`extensions.DefineSinglePoint` with the provider interface and message
+structs. `mobyextgen` always infers `<PointID>.<InterfaceName>`.
+
+The generated Point package exports `ServerPoint`, `ClientPoint`, and
+handwritten-interface `NewClient(conn)`:
+
+- `ServerPoint` serves an ordinary point to an SDK server or a dependency callback.
+- `ClientPoint` builds the host-side provider adapter for a launched ordinary point.
+- `NewClient(conn)` returns the handwritten Go interface over a gRPC connection.
+
+The extension implements ordinary Points and separately offers a selected
+subset as metadata:
+
+```go
+Providers: []extensions.Provider{
+	greeterv0.Point.Provide(greeter{}),
+	servicev0.Offer(greeterv0.Point),
+}
+```
+
+`servicev0.Offer` carries no transport registration and grants no publication
+authority. The Host applies `AllowPublication(extension, point)` and denies all
+offers when the policy is nil.
+
+An out-of-process extension passes every ordinary provider's generated
+`ServerPoint` to `sdk.Main` or `Server.Register`. The SDK records service names
+under the ordinary Point and serializes offered Point IDs separately. The Host
+may omit `ClientPoint` wiring for an offered-only Point; add it when the daemon
+also calls that Point internally.
+
+For in-process offers, Host composition supplies generated adapters through
+`PointServers`. The Host resolves the implementation from the same extension,
+applies policy, and preflights daemon-reserved, process, and in-process service
+name collisions before registration.
+
+External callers use the generated client directly over an existing host or
+proxy connection:
+
+```go
+client := greeterpb.NewClient(hostConn)
+reply, err := client.Greet(ctx, &greeterv0.HelloRequest{Name: "world"})
+```
+
+For an out-of-process extension, the SDK registers generated services on the
+extension server and reports their fully qualified names. The daemon proxies
+matching calls by name and forwards the raw gRPC stream, including metadata and
+status.
+
+Generated service names are captured from generated registration, not listed manually.
+The extension must provide the shared publication point before publishing its
+service inventory. A name cannot collide with another extension or a service
+already served by the daemon; collision fails startup rather than shadowing the
+existing service.
 
 These services use the raw gRPC endpoint beside the daemon's own gRPC services.
 Authorization plugins gate the REST API, not this endpoint; an exposed service must enforce any access control it needs.

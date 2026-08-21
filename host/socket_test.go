@@ -10,21 +10,22 @@ import (
 
 	"github.com/moby/extensions"
 	"github.com/moby/extensions/clientpoint"
+	greeterv0 "github.com/moby/extensions/example/greeter/v0"
 	greeterpb "github.com/moby/extensions/example/greeter/v0/protogen"
-	servicegrpcv0 "github.com/moby/extensions/extpoints/servicegrpc/v0"
 	"github.com/moby/extensions/grpcproxy"
 	"github.com/moby/extensions/host"
 	echov1 "github.com/moby/extensions/internal/launcher/echo/v1"
 	echopb "github.com/moby/extensions/internal/launcher/echo/v1/protogen"
+	"github.com/moby/extensions/serverpoint"
 	"github.com/moby/extensions/testdata/greeter"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"gotest.tools/v3/assert"
 )
 
-// TestSocketExposure verifies an out-of-process service is reachable by name
-// through a proxy without importing its proto.
-func TestSocketExposure(t *testing.T) {
+// TestPointSocketExposure verifies an out-of-process published Point is
+// reachable by name through a proxy.
+func TestPointSocketExposure(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and launches a helper binary")
 	}
@@ -41,14 +42,16 @@ func TestSocketExposure(t *testing.T) {
 	defer cancel()
 
 	h, err := host.New(ctx, host.Options{
-		RuntimeDir:       shortTempDir(t),
-		Dirs:             []string{dir},
-		ExposeOnlyPoints: []extensions.PointID{servicegrpcv0.Point.ID()},
+		RuntimeDir: shortTempDir(t),
+		Dirs:       []string{dir},
+		AllowPublication: host.PublicationPolicyFunc(func(extension extensions.ExtensionID, point extensions.PointID) bool {
+			return extension == greeter.ID && point == greeterv0.Point.ID()
+		}),
 	})
 	assert.NilError(t, err)
 	defer func() { assert.NilError(t, h.Shutdown(context.Background())) }()
 
-	services := h.ServicesForPoint(servicegrpcv0.Point.ID())
+	services := h.PublishedServicesForPoint(greeterv0.Point.ID())
 	assert.DeepEqual(t, services, map[extensions.ExtensionID][]string{
 		greeter.ID: {"org.mobyproject.extension.example.greeter.v0.Greeter"},
 	})
@@ -73,14 +76,14 @@ func TestSocketExposure(t *testing.T) {
 	assert.NilError(t, err)
 	defer func() { assert.NilError(t, conn.Close()) }()
 
-	resp, err := greeterpb.NewGreeterClient(conn).Greet(ctx, &greeterpb.HelloRequest{Name: "world"})
+	resp, err := greeterpb.NewClient(conn).Greet(ctx, &greeterv0.HelloRequest{Name: "world"})
 	assert.NilError(t, err)
-	assert.Equal(t, resp.GetMessage(), "hello world")
+	assert.Equal(t, resp.Message, "hello world")
 }
 
-// TestHookOnlyServicesAreNotSocketExposed verifies hook services stay on the
-// private extension socket without service.grpc opt-in.
-func TestHookOnlyServicesAreNotSocketExposed(t *testing.T) {
+// TestProcessOfferIsDeniedByDefault verifies a nil Host policy keeps an offered
+// Point private without affecting its internal client wiring.
+func TestProcessOfferIsDeniedByDefault(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and launches a helper binary")
 	}
@@ -104,8 +107,7 @@ func TestHookOnlyServicesAreNotSocketExposed(t *testing.T) {
 	assert.NilError(t, err)
 	defer func() { assert.NilError(t, h.Shutdown(context.Background())) }()
 
-	assert.Check(t, h.ServicesForPoint(servicegrpcv0.Point.ID())[id] == nil)
-	assert.DeepEqual(t, h.ServicesForPoint(echov1.Point.ID())[id], []string{"moby.extensions.internal.launcher.echo.v1.Echo"})
+	assert.Check(t, h.PublishedServicesForPoint(echov1.Point.ID())[id] == nil)
 
 	conn, ok := h.Conn(id)
 	assert.Check(t, ok)
@@ -115,24 +117,28 @@ func TestHookOnlyServicesAreNotSocketExposed(t *testing.T) {
 	assert.Equal(t, resp.GetMessage(), "private")
 }
 
-// TestInProcessServiceExposure verifies an in-process service is registered
-// directly on the host gRPC server.
-func TestInProcessServiceExposure(t *testing.T) {
+// TestInProcessPointExposure verifies a published Point can be collected and
+// registered directly on a gRPC server without a process boundary.
+func TestInProcessPointExposure(t *testing.T) {
 	ctx := context.Background()
 	h, err := host.New(ctx, host.Options{
 		RuntimeDir: shortTempDir(t),
 		Extensions: []extensions.Extension{greeter.Extension},
+		PointServers: []serverpoint.Registration{
+			greeterpb.ServerPoint,
+		},
+		AllowPublication: host.PublicationPolicyFunc(func(extension extensions.ExtensionID, point extensions.PointID) bool {
+			return extension == greeter.ID && point == greeterv0.Point.ID()
+		}),
 	})
 	assert.NilError(t, err)
 	defer func() { assert.NilError(t, h.Shutdown(context.Background())) }()
+	assert.DeepEqual(t, h.PublishedServicesForPoint(greeterv0.Point.ID()), map[extensions.ExtensionID][]string{
+		greeter.ID: {"org.mobyproject.extension.example.greeter.v0.Greeter"},
+	})
 
-	services, err := servicegrpcv0.Collect(h)
-	assert.NilError(t, err)
 	srv := grpc.NewServer()
-	for _, svc := range services {
-		srv.RegisterService(svc.Desc, svc.Impl)
-	}
-
+	h.RegisterInProcessServices(srv)
 	sock := filepath.Join(shortTempDir(t), "api.sock")
 	lis, err := net.Listen("unix", sock)
 	assert.NilError(t, err)
@@ -143,7 +149,7 @@ func TestInProcessServiceExposure(t *testing.T) {
 	assert.NilError(t, err)
 	defer func() { assert.NilError(t, conn.Close()) }()
 
-	resp, err := greeterpb.NewGreeterClient(conn).Greet(ctx, &greeterpb.HelloRequest{Name: "world"})
+	resp, err := greeterpb.NewClient(conn).Greet(ctx, &greeterv0.HelloRequest{Name: "world"})
 	assert.NilError(t, err)
-	assert.Equal(t, resp.GetMessage(), "hello world")
+	assert.Equal(t, resp.Message, "hello world")
 }

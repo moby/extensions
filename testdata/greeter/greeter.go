@@ -6,9 +6,7 @@ import (
 
 	"github.com/moby/extensions"
 	greeterv0 "github.com/moby/extensions/example/greeter/v0"
-	greeterpb "github.com/moby/extensions/example/greeter/v0/protogen"
-	servicegrpcv0 "github.com/moby/extensions/extpoints/servicegrpc/v0"
-	"google.golang.org/grpc"
+	servicev0 "github.com/moby/extensions/extpoints/service/v0"
 )
 
 // ID is the extension id and binary name.
@@ -20,15 +18,11 @@ func (greeter) Greet(_ context.Context, req *greeterv0.HelloRequest) (*greeterv0
 	return &greeterv0.HelloReply{Message: "hello " + req.Name}, nil
 }
 
-// expose registers the greeter gRPC service for socket exposure.
-type expose struct{}
-
-func (expose) RegisterServices(r grpc.ServiceRegistrar) {
-	greeterpb.ServerPoint.Register(r, greeter{})
-}
-
-// Extension implements the service.grpc point.
+// Extension publishes the greeter point for socket exposure.
 var Extension = extensions.New(extensions.Declaration{
-	ID:        ID,
-	Providers: []extensions.Provider{servicegrpcv0.Point.Provide(expose{})},
+	ID: ID,
+	Providers: []extensions.Provider{
+		greeterv0.Point.Provide(greeter{}),
+		servicev0.Offer(greeterv0.Point),
+	},
 })

@@ -204,43 +204,66 @@ func clientProviders() []clientpoint.Registration {
 This list is the boundary for launched providers: an unlisted declared point is rejected, while any installed extension may provide a listed point.
 See [DESIGN.md#discovery-security](./DESIGN.md#discovery-security).
 
-An externally published gRPC service is not added to this list.
-It uses socket exposure instead.
+An offered-only process Point does not need `ClientPoint` wiring because the Host
+proxies its generated service without constructing an internal caller.
 
-### Socket-exposed services
+### Publishing an ordinary Point
 
-Socket exposure is an extension's own gRPC API, not a daemon-called point.
-The daemon forwards raw calls by service name without importing the proto.
-Opt in with `service.grpc` and register through the supplied registrar:
+Publication uses the same ordinary Point contract; there is no standalone
+service contract. Implement the Point and separately offer it:
 
 ```go
-type expose struct{}
-
-func (expose) RegisterServices(r grpc.ServiceRegistrar) {
-	mypb.RegisterMyServiceServer(r, impl) // or mypb.ServerPoint.Register(r, impl)
-}
-
 var Extension = extensions.New(extensions.Declaration{
-	ID:        "com.example.myext.v1",
-	Providers: []extensions.Provider{servicegrpcv0.Point.Provide(expose{})},
+	ID: "org.example.greeter.v1",
+	Providers: []extensions.Provider{
+		greeterv0.Point.Provide(greeter{}),
+		servicev0.Offer(greeterv0.Point),
+	},
 })
 ```
 
-The same implementation works in both modes: in-process, the daemon supplies its gRPC server; out-of-process, the SDK supplies the extension server, records names, and the daemon proxies matching calls.
-
-An out-of-process binary registers `ServerPoint` for every point it provides:
+One offer can select a subset of several implemented Points:
 
 ```go
-srv := sdk.NewServer()
-srv.Register(ext,
-	servicegrpcv0.ServerPoint,
-	mypointpb.ServerPoint, // include every other point this extension provides
-)
-srv.Listen(ctx)
+Providers: []extensions.Provider{
+	foov1.Point.Provide(fooImpl{}),
+	barv1.Point.Provide(barImpl{}),
+	servicev0.Offer(foov1.Point),
+}
 ```
 
-Service names are captured from registration, so do not list them manually.
-Point id, proto package, gRPC service name, and CLI route remain different identifiers; see [DESIGN.md#identifiers](./DESIGN.md#identifiers).
+The Host defaults to deny. Allow an offer only through explicit policy:
+
+```go
+AllowPublication: host.PublicationPolicyFunc(func(extension extensions.ExtensionID, point extensions.PointID) bool {
+	return extension == "org.example.greeter.v1" && point == greeterv0.Point.ID()
+}),
+```
+
+For an in-process extension, supply generated adapters at Host composition:
+
+```go
+PointServers: []serverpoint.Registration{greeterpb.ServerPoint},
+```
+
+A separate binary passes every ordinary provider's generated `ServerPoint` to
+the SDK, whether the Point is internal, offered, or both:
+
+```go
+sdk.Main(extension, greeterpb.ServerPoint)
+```
+
+External callers use the generated handwritten client over the host connection:
+
+```go
+client := greeterpb.NewClient(hostConn)
+reply, err := client.Greet(ctx, &greeterv0.HelloRequest{Name: "world"})
+```
+
+The current backend is gRPC. For a launched extension, the SDK registers the
+generated service, the daemon records its fully qualified name, and the proxy
+forwards the raw gRPC stream, including metadata and status. Arbitrary raw gRPC
+publication is not part of the extension API.
 
 ## Writing an extension
 
@@ -360,9 +383,12 @@ Health checks, reconnect, and restart are future work in [ROADMAP.md](./ROADMAP.
 - [ ] Define resolution/cardinality, ordering, call/veto, dependency, and failure behavior in the point contract.
 - [ ] Generate and commit `.proto` and `protogen/` output.
 - [ ] Call a helper from the engine flow, passing the host resolver.
-- [ ] Add generated `ClientPoint` wiring for separate-binary providers.
+- [ ] Add generated `ClientPoint` wiring when the daemon calls a separate-binary provider internally.
 - [ ] Add dependency `ServerPoint` wiring when separate binaries call engine points.
-- [ ] Register every provider's `ServerPoint` in a separate binary.
+- [ ] Register every ordinary provider's `ServerPoint` in a separate binary.
+- [ ] Implement every published API as an ordinary `Point.Provide(impl)` provider.
+- [ ] Offer selected implemented Points with `servicev0.Offer`.
+- [ ] Add Host publication policy and in-process `PointServers` wiring as needed.
 - [ ] Keep handshake output on stdout and logs on stderr.
 - [ ] Install one correctly named, non-world-writable binary in the trusted extension directory.
 
@@ -371,6 +397,11 @@ Health checks, reconnect, and restart are future work in [ROADMAP.md](./ROADMAP.
 | Task | Where | What |
 |---|---|---|
 | Define a point | `extpoints/<area>/<name>/v0/<name>.go` | Go interface, `pb` messages, `DefinePoint`, helpers |
+| Name its wire service | same contract file | inferred `<PointID>.<InterfaceName>` |
+| Offer an ordinary point | extension declaration | implement it with `Point.Provide` and name it in `servicev0.Offer` |
+| Authorize publication | host options | set default-deny `AllowPublication`; supply `PointServers` for in-process offers |
+| Invoke a published point | external caller | use generated `NewClient(hostConn)` |
+| Serve an ordinary point | SDK or dependency wiring | pass its generated `ServerPoint` |
 | Wire it | `extpoints/<area>/<name>/v0/<name>.go` | package doc and identical `//go:generate` |
 | Generate | `go generate ./extpoints/<area>/<name>/v0/` | regenerate `.proto` and `protogen/` |
 | Invoke it | relevant engine flow | call the contract helper with the host resolver |

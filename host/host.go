@@ -14,11 +14,27 @@ import (
 
 	"github.com/moby/extensions"
 	"github.com/moby/extensions/clientpoint"
+	servicev0 "github.com/moby/extensions/extpoints/service/v0"
 	"github.com/moby/extensions/internal/broker"
 	"github.com/moby/extensions/internal/launcher"
 	"github.com/moby/extensions/serverpoint"
+	"github.com/moby/extensions/servicegrpc"
 	"google.golang.org/grpc"
 )
+
+// PublicationPolicy decides whether one extension's offered Point may be
+// published externally.
+type PublicationPolicy interface {
+	Allow(extension extensions.ExtensionID, point extensions.PointID) bool
+}
+
+// PublicationPolicyFunc adapts a function to [PublicationPolicy].
+type PublicationPolicyFunc func(extension extensions.ExtensionID, point extensions.PointID) bool
+
+// Allow calls f. A nil function denies publication.
+func (f PublicationPolicyFunc) Allow(extension extensions.ExtensionID, point extensions.PointID) bool {
+	return f != nil && f(extension, point)
+}
 
 // Options configures a [Host].
 type Options struct {
@@ -29,11 +45,18 @@ type Options struct {
 	// Dirs are scanned for out-of-process extension binaries.
 	Dirs []string
 	// ClientProviders lists supported out-of-process points and their client
-	// wiring. Unlisted points are rejected unless listed in ExposeOnlyPoints.
+	// wiring. Unlisted points are rejected unless the extension offered them only
+	// for external publication.
 	ClientProviders []clientpoint.Registration
-	// ExposeOnlyPoints are points with no in-daemon caller. Their services can be
-	// inspected with ServicesForPoint; service.grpc uses this for socket exposure.
-	ExposeOnlyPoints []extensions.PointID
+	// AllowPublication decides which offered Points become externally reachable.
+	// A nil policy denies all publication.
+	AllowPublication PublicationPolicy
+	// PointServers lists generated adapters available for allowed in-process
+	// offers.
+	PointServers []serverpoint.Registration
+	// ReservedServices are daemon-owned gRPC service names that extensions cannot
+	// publish.
+	ReservedServices []string
 	// ExtensionConfig holds configuration keyed by extension id.
 	ExtensionConfig map[extensions.ExtensionID]extensions.Config
 	// DependencyProviders are points launched extensions may call over the
@@ -48,9 +71,10 @@ type Host struct {
 	conns map[extensions.ExtensionID]grpc.ClientConnInterface
 	// loaded owns the resources acquired for installed extensions in load order.
 	loaded []loadedExtension
-	// processServices indexes service publication metadata from launched
-	// extensions separately from their runtime ownership.
-	processServices map[extensions.ExtensionID]map[extensions.PointID][]string
+	// publishedServices contains only services approved by Host policy.
+	publishedServices map[extensions.ExtensionID]map[extensions.PointID][]string
+	// inProcessServices are approved and prevalidated for daemon registration.
+	inProcessServices []servicegrpc.Service
 	// callback serves launched extensions' declared dependencies.
 	callback *grpc.Server
 }
@@ -67,6 +91,7 @@ type hostedExtension struct {
 	dependencies []extensions.Dependency
 	conflicts    []extensions.ExtensionID
 	points       []extensions.PointID
+	offered      []extensions.PointID
 	conn         grpc.ClientConnInterface
 	initialize   func(context.Context, extensions.Config) error
 	shutdown     func(context.Context) error
@@ -78,16 +103,24 @@ func (h *Host) Conn(extension extensions.ExtensionID) (grpc.ClientConnInterface,
 	return conn, ok
 }
 
-// ServicesForPoint returns the service names a launched extension serves for a
-// point. In-process services are registered on the daemon's gRPC server.
-func (h *Host) ServicesForPoint(point extensions.PointID) map[extensions.ExtensionID][]string {
+// PublishedServicesForPoint returns process service names approved for external
+// publication under point.
+func (h *Host) PublishedServicesForPoint(point extensions.PointID) map[extensions.ExtensionID][]string {
 	out := make(map[extensions.ExtensionID][]string)
-	for id, services := range h.processServices {
-		if len(services[point]) > 0 {
-			out[id] = services[point]
+	for id, services := range h.publishedServices {
+		if names := services[point]; len(names) > 0 {
+			out[id] = append([]string(nil), names...)
 		}
 	}
 	return out
+}
+
+// RegisterInProcessServices installs all policy-approved in-process Point
+// services on registrar.
+func (h *Host) RegisterInProcessServices(registrar grpc.ServiceRegistrar) {
+	for _, service := range h.inProcessServices {
+		service.Register(registrar)
+	}
 }
 
 // New registers, launches, and initializes the configured extensions. It tears
@@ -97,14 +130,23 @@ func New(ctx context.Context, opts Options) (_ *Host, retErr error) {
 	if err != nil {
 		return nil, err
 	}
-	exposeOnly := make(map[extensions.PointID]bool, len(opts.ExposeOnlyPoints))
-	for _, p := range opts.ExposeOnlyPoints {
-		exposeOnly[p] = true
+	pointServers, err := serverPointMap(opts.PointServers)
+	if err != nil {
+		return nil, err
+	}
+	reservedServices := make(map[string]bool, len(opts.ReservedServices))
+	for _, service := range opts.ReservedServices {
+		if service == "" {
+			return nil, errors.New("reserved gRPC service name is empty")
+		}
+		reservedServices[service] = true
 	}
 	b := broker.New()
 	conns := make(map[extensions.ExtensionID]grpc.ClientConnInterface)
 	var loaded []loadedExtension
-	processServices := make(map[extensions.ExtensionID]map[extensions.PointID][]string)
+	publishedServices := make(map[extensions.ExtensionID]map[extensions.PointID][]string)
+	publishedOwners := make(map[string]extensions.ExtensionID)
+	var inProcessServices []servicegrpc.Service
 	var callback *grpc.Server
 	// The broker only shuts down initialized extensions, so construction failures
 	// also explicitly close loaded resources.
@@ -125,6 +167,11 @@ func New(ctx context.Context, opts Options) (_ *Host, retErr error) {
 	}
 
 	for _, ext := range opts.Extensions {
+		services, err := collectInProcessPublications(ext, opts.AllowPublication, pointServers, publishedServices, publishedOwners, reservedServices)
+		if err != nil {
+			return nil, err
+		}
+		inProcessServices = append(inProcessServices, services...)
 		if err := b.RegisterBuiltin(ext); err != nil {
 			return nil, err
 		}
@@ -140,12 +187,14 @@ func New(ctx context.Context, opts Options) (_ *Host, retErr error) {
 			return nil, err
 		}
 		for _, bin := range bins {
-			loadedExt, started, err := loadProcess(ctx, l, bin, providers, exposeOnly)
+			loadedExt, started, err := loadProcess(ctx, l, bin, providers)
 			if err != nil {
 				return nil, err
 			}
 			loaded = append(loaded, loadedExt)
-			processServices[started.ID] = started.ProviderServices
+			if err := approveProcessPublications(started, opts.AllowPublication, publishedServices, publishedOwners, reservedServices); err != nil {
+				return nil, err
+			}
 			if err := b.Register(loadedExt.extension); err != nil {
 				return nil, err
 			}
@@ -180,7 +229,99 @@ func New(ctx context.Context, opts Options) (_ *Host, retErr error) {
 	if err := b.Init(ctx, opts.ExtensionConfig); err != nil {
 		return nil, err
 	}
-	return &Host{broker: b, conns: conns, loaded: loaded, processServices: processServices, callback: callback}, nil
+	return &Host{broker: b, conns: conns, loaded: loaded, publishedServices: publishedServices, inProcessServices: inProcessServices, callback: callback}, nil
+}
+
+func approveProcessPublications(started *launcher.Launched, policy PublicationPolicy, published map[extensions.ExtensionID]map[extensions.PointID][]string, owners map[string]extensions.ExtensionID, reserved map[string]bool) error {
+	if policy == nil {
+		return nil
+	}
+	for _, point := range started.OfferedPoints {
+		if !policy.Allow(started.ID, point) {
+			continue
+		}
+		names := started.ProviderServices[point]
+		if len(names) == 0 {
+			return fmt.Errorf("extension %q offered point %q without a gRPC service", started.ID, point)
+		}
+		for _, service := range names {
+			if reserved[service] {
+				return fmt.Errorf("extension %q cannot publish reserved gRPC service %q", started.ID, service)
+			}
+			if owner, exists := owners[service]; exists {
+				return fmt.Errorf("extensions %q and %q both publish gRPC service %q", owner, started.ID, service)
+			}
+			owners[service] = started.ID
+		}
+		if published[started.ID] == nil {
+			published[started.ID] = make(map[extensions.PointID][]string)
+		}
+		published[started.ID][point] = append([]string(nil), names...)
+	}
+	return nil
+}
+
+func collectInProcessPublications(ext extensions.Extension, policy PublicationPolicy, servers map[extensions.PointID]serverpoint.Registration, published map[extensions.ExtensionID]map[extensions.PointID][]string, owners map[string]extensions.ExtensionID, reserved map[string]bool) ([]servicegrpc.Service, error) {
+	decl := ext.Declaration()
+	providers := make(map[extensions.PointID]any, len(decl.Providers))
+	for _, provider := range decl.Providers {
+		if _, exists := providers[provider.Point]; exists {
+			return nil, fmt.Errorf("extension %q provides point %q more than once", decl.ID, provider.Point)
+		}
+		providers[provider.Point] = provider.Impl
+	}
+
+	var services []servicegrpc.Service
+	seen := make(map[extensions.PointID]bool)
+	for _, provider := range decl.Providers {
+		if provider.Point != servicev0.Point.ID() {
+			continue
+		}
+		metadata, ok := provider.Impl.(servicev0.Provider)
+		if !ok {
+			return nil, fmt.Errorf("extension %q: point %q has incompatible offer metadata", decl.ID, provider.Point)
+		}
+		for _, point := range metadata.OfferedPoints() {
+			if err := extensions.ValidatePointID(point); err != nil {
+				return nil, fmt.Errorf("extension %q: invalid offered point: %w", decl.ID, err)
+			}
+			if point == servicev0.Point.ID() {
+				return nil, fmt.Errorf("extension %q: publication metadata point %q cannot offer itself", decl.ID, point)
+			}
+			if seen[point] {
+				return nil, fmt.Errorf("extension %q: point %q is offered more than once", decl.ID, point)
+			}
+			seen[point] = true
+			impl, implemented := providers[point]
+			if !implemented {
+				return nil, fmt.Errorf("extension %q: offered point %q is not implemented", decl.ID, point)
+			}
+			if policy == nil || !policy.Allow(decl.ID, point) {
+				continue
+			}
+			registration, ok := servers[point]
+			if !ok {
+				return nil, fmt.Errorf("extension %q: allowed in-process offer for point %q has no server registration", decl.ID, point)
+			}
+			service, err := servicegrpc.Adapt(registration, impl)
+			if err != nil {
+				return nil, fmt.Errorf("extension %q: publish point %q: %w", decl.ID, point, err)
+			}
+			if reserved[service.Name] {
+				return nil, fmt.Errorf("extension %q cannot publish reserved gRPC service %q", decl.ID, service.Name)
+			}
+			if owner, exists := owners[service.Name]; exists {
+				return nil, fmt.Errorf("extensions %q and %q both publish gRPC service %q", owner, decl.ID, service.Name)
+			}
+			owners[service.Name] = decl.ID
+			services = append(services, service)
+			if published[decl.ID] == nil {
+				published[decl.ID] = make(map[extensions.PointID][]string)
+			}
+			published[decl.ID][point] = []string{service.Name}
+		}
+	}
+	return services, nil
 }
 
 // serveCallback starts the server for launched extensions' declared
@@ -257,7 +398,7 @@ func closeLoadedErr(ctx context.Context, loaded []loadedExtension) error {
 // loadProcess launches and adapts one out-of-process extension.
 // The launched process remains guarded until the loaded resource is returned to
 // its owner.
-func loadProcess(ctx context.Context, l launcher.Launcher, bin string, providers map[extensions.PointID]clientpoint.Provider, exposeOnly map[extensions.PointID]bool) (loadedExtension, *launcher.Launched, error) {
+func loadProcess(ctx context.Context, l launcher.Launcher, bin string, providers map[extensions.PointID]clientpoint.Provider) (loadedExtension, *launcher.Launched, error) {
 	launched, err := l.Launch(ctx, bin)
 	if err != nil {
 		return loadedExtension{}, nil, err
@@ -271,7 +412,7 @@ func loadProcess(ctx context.Context, l launcher.Launcher, bin string, providers
 	}()
 
 	hosted := hostedExtensionFromLaunched(launched)
-	ext, err := extensionFromHosted(hosted, providers, exposeOnly)
+	ext, err := extensionFromHosted(hosted, providers)
 	if err != nil {
 		return loadedExtension{}, nil, err
 	}
@@ -292,6 +433,20 @@ func clientProviderMap(regs []clientpoint.Registration) (map[extensions.PointID]
 	return m, nil
 }
 
+func serverPointMap(regs []serverpoint.Registration) (map[extensions.PointID]serverpoint.Registration, error) {
+	servers := make(map[extensions.PointID]serverpoint.Registration, len(regs))
+	for _, registration := range regs {
+		if registration.Point == "" || registration.Register == nil {
+			return nil, errors.New("incomplete in-process server registration")
+		}
+		if _, exists := servers[registration.Point]; exists {
+			return nil, fmt.Errorf("duplicate in-process server registration for point %q", registration.Point)
+		}
+		servers[registration.Point] = registration
+	}
+	return servers, nil
+}
+
 // hostedExtensionFromLaunched adapts process declaration and lifecycle fields to
 // the runtime-neutral hosted extension contract.
 func hostedExtensionFromLaunched(launched *launcher.Launched) hostedExtension {
@@ -304,6 +459,7 @@ func hostedExtensionFromLaunched(launched *launcher.Launched) hostedExtension {
 		dependencies: launched.Dependencies,
 		conflicts:    launched.Conflicts,
 		points:       points,
+		offered:      append([]extensions.PointID(nil), launched.OfferedPoints...),
 		conn:         launched.Conn,
 		// Configuration already arrived in the process launch handshake, so the
 		// broker's configuration is intentionally ignored.
@@ -316,7 +472,7 @@ func hostedExtensionFromLaunched(launched *launcher.Launched) hostedExtension {
 
 // extensionFromHosted builds a declaration and client providers from one
 // runtime-neutral hosted extension.
-func extensionFromHosted(hosted hostedExtension, providers map[extensions.PointID]clientpoint.Provider, exposeOnly map[extensions.PointID]bool) (extensions.Extension, error) {
+func extensionFromHosted(hosted hostedExtension, providers map[extensions.PointID]clientpoint.Provider) (extensions.Extension, error) {
 	decl := extensions.Declaration{
 		ID:           hosted.id,
 		Dependencies: hosted.dependencies,
@@ -328,13 +484,21 @@ func extensionFromHosted(hosted hostedExtension, providers map[extensions.PointI
 		// its dependencies alive until its Shutdown hook has run.
 		Shutdown: hosted.shutdown,
 	}
+	offered := make(map[extensions.PointID]bool, len(hosted.offered))
+	for _, point := range hosted.offered {
+		offered[point] = true
+	}
 	for _, point := range hosted.points {
-		if exposeOnly[point] {
-			// Expose-only points are published, not called in-daemon.
+		if point == servicev0.Point.ID() {
+			// Publication metadata has no in-daemon provider or client adapter.
 			continue
 		}
 		build, ok := providers[point]
 		if !ok {
+			if offered[point] {
+				// An offered-only Point is proxied externally and has no in-daemon caller.
+				continue
+			}
 			// The daemon cannot call an unlisted point.
 			return nil, fmt.Errorf("extension %q declares unsupported point %q", hosted.id, point)
 		}

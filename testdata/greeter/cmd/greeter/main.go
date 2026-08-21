@@ -3,11 +3,11 @@
 package main
 
 import (
-	servicegrpcv0 "github.com/moby/extensions/extpoints/servicegrpc/v0"
+	greeterpb "github.com/moby/extensions/example/greeter/v0/protogen"
 	"github.com/moby/extensions/sdk"
 	"github.com/moby/extensions/testdata/greeter"
 )
 
 func main() {
-	sdk.Main(greeter.Extension, sdk.WithServerPoints(servicegrpcv0.ServerPoint))
+	sdk.Main(greeter.Extension, sdk.WithServerPoints(greeterpb.ServerPoint))
 }

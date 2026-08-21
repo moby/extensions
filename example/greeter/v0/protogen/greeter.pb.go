@@ -2,17 +2,16 @@
 // versions:
 // 	protoc-gen-go v1.36.11-devel
 // 	protoc        (unknown)
-// source: internal/extensions/example/greeter/v0/greeter.proto
+// source: example/greeter/v0/greeter.proto
 
 package protogen
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -31,7 +30,7 @@ type HelloReply struct {
 
 func (x *HelloReply) Reset() {
 	*x = HelloReply{}
-	mi := &file_internal_extensions_example_greeter_v0_greeter_proto_msgTypes[0]
+	mi := &file_example_greeter_v0_greeter_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -43,7 +42,7 @@ func (x *HelloReply) String() string {
 func (*HelloReply) ProtoMessage() {}
 
 func (x *HelloReply) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_extensions_example_greeter_v0_greeter_proto_msgTypes[0]
+	mi := &file_example_greeter_v0_greeter_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -56,7 +55,7 @@ func (x *HelloReply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HelloReply.ProtoReflect.Descriptor instead.
 func (*HelloReply) Descriptor() ([]byte, []int) {
-	return file_internal_extensions_example_greeter_v0_greeter_proto_rawDescGZIP(), []int{0}
+	return file_example_greeter_v0_greeter_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *HelloReply) GetMessage() string {
@@ -75,7 +74,7 @@ type HelloRequest struct {
 
 func (x *HelloRequest) Reset() {
 	*x = HelloRequest{}
-	mi := &file_internal_extensions_example_greeter_v0_greeter_proto_msgTypes[1]
+	mi := &file_example_greeter_v0_greeter_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -87,7 +86,7 @@ func (x *HelloRequest) String() string {
 func (*HelloRequest) ProtoMessage() {}
 
 func (x *HelloRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_extensions_example_greeter_v0_greeter_proto_msgTypes[1]
+	mi := &file_example_greeter_v0_greeter_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -100,7 +99,7 @@ func (x *HelloRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HelloRequest.ProtoReflect.Descriptor instead.
 func (*HelloRequest) Descriptor() ([]byte, []int) {
-	return file_internal_extensions_example_greeter_v0_greeter_proto_rawDescGZIP(), []int{1}
+	return file_example_greeter_v0_greeter_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *HelloRequest) GetName() string {
@@ -110,11 +109,11 @@ func (x *HelloRequest) GetName() string {
 	return ""
 }
 
-var File_internal_extensions_example_greeter_v0_greeter_proto protoreflect.FileDescriptor
+var File_example_greeter_v0_greeter_proto protoreflect.FileDescriptor
 
-const file_internal_extensions_example_greeter_v0_greeter_proto_rawDesc = "" +
+const file_example_greeter_v0_greeter_proto_rawDesc = "" +
 	"\n" +
-	"4internal/extensions/example/greeter/v0/greeter.proto\x12,org.mobyproject.extension.example.greeter.v0\"&\n" +
+	" example/greeter/v0/greeter.proto\x12,org.mobyproject.extension.example.greeter.v0\"&\n" +
 	"\n" +
 	"HelloReply\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"\"\n" +
@@ -124,23 +123,23 @@ const file_internal_extensions_example_greeter_v0_greeter_proto_rawDesc = "" +
 	"\x05Greet\x12:.org.mobyproject.extension.example.greeter.v0.HelloRequest\x1a8.org.mobyproject.extension.example.greeter.v0.HelloReplyB8Z6github.com/moby/extensions/example/greeter/v0/protogenb\x06proto3"
 
 var (
-	file_internal_extensions_example_greeter_v0_greeter_proto_rawDescOnce sync.Once
-	file_internal_extensions_example_greeter_v0_greeter_proto_rawDescData []byte
+	file_example_greeter_v0_greeter_proto_rawDescOnce sync.Once
+	file_example_greeter_v0_greeter_proto_rawDescData []byte
 )
 
-func file_internal_extensions_example_greeter_v0_greeter_proto_rawDescGZIP() []byte {
-	file_internal_extensions_example_greeter_v0_greeter_proto_rawDescOnce.Do(func() {
-		file_internal_extensions_example_greeter_v0_greeter_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_extensions_example_greeter_v0_greeter_proto_rawDesc), len(file_internal_extensions_example_greeter_v0_greeter_proto_rawDesc)))
+func file_example_greeter_v0_greeter_proto_rawDescGZIP() []byte {
+	file_example_greeter_v0_greeter_proto_rawDescOnce.Do(func() {
+		file_example_greeter_v0_greeter_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_example_greeter_v0_greeter_proto_rawDesc), len(file_example_greeter_v0_greeter_proto_rawDesc)))
 	})
-	return file_internal_extensions_example_greeter_v0_greeter_proto_rawDescData
+	return file_example_greeter_v0_greeter_proto_rawDescData
 }
 
-var file_internal_extensions_example_greeter_v0_greeter_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_internal_extensions_example_greeter_v0_greeter_proto_goTypes = []any{
+var file_example_greeter_v0_greeter_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_example_greeter_v0_greeter_proto_goTypes = []any{
 	(*HelloReply)(nil),   // 0: org.mobyproject.extension.example.greeter.v0.HelloReply
 	(*HelloRequest)(nil), // 1: org.mobyproject.extension.example.greeter.v0.HelloRequest
 }
-var file_internal_extensions_example_greeter_v0_greeter_proto_depIdxs = []int32{
+var file_example_greeter_v0_greeter_proto_depIdxs = []int32{
 	1, // 0: org.mobyproject.extension.example.greeter.v0.Greeter.Greet:input_type -> org.mobyproject.extension.example.greeter.v0.HelloRequest
 	0, // 1: org.mobyproject.extension.example.greeter.v0.Greeter.Greet:output_type -> org.mobyproject.extension.example.greeter.v0.HelloReply
 	1, // [1:2] is the sub-list for method output_type
@@ -150,26 +149,26 @@ var file_internal_extensions_example_greeter_v0_greeter_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_internal_extensions_example_greeter_v0_greeter_proto_init() }
-func file_internal_extensions_example_greeter_v0_greeter_proto_init() {
-	if File_internal_extensions_example_greeter_v0_greeter_proto != nil {
+func init() { file_example_greeter_v0_greeter_proto_init() }
+func file_example_greeter_v0_greeter_proto_init() {
+	if File_example_greeter_v0_greeter_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeFor[x]().PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_extensions_example_greeter_v0_greeter_proto_rawDesc), len(file_internal_extensions_example_greeter_v0_greeter_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_example_greeter_v0_greeter_proto_rawDesc), len(file_example_greeter_v0_greeter_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_internal_extensions_example_greeter_v0_greeter_proto_goTypes,
-		DependencyIndexes: file_internal_extensions_example_greeter_v0_greeter_proto_depIdxs,
-		MessageInfos:      file_internal_extensions_example_greeter_v0_greeter_proto_msgTypes,
+		GoTypes:           file_example_greeter_v0_greeter_proto_goTypes,
+		DependencyIndexes: file_example_greeter_v0_greeter_proto_depIdxs,
+		MessageInfos:      file_example_greeter_v0_greeter_proto_msgTypes,
 	}.Build()
-	File_internal_extensions_example_greeter_v0_greeter_proto = out.File
-	file_internal_extensions_example_greeter_v0_greeter_proto_goTypes = nil
-	file_internal_extensions_example_greeter_v0_greeter_proto_depIdxs = nil
+	File_example_greeter_v0_greeter_proto = out.File
+	file_example_greeter_v0_greeter_proto_goTypes = nil
+	file_example_greeter_v0_greeter_proto_depIdxs = nil
 }

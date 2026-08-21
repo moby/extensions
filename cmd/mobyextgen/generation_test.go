@@ -34,7 +34,6 @@ import "github.com/moby/extensions"
 type S interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
 type Req struct{ ContainerID string ` + "`pb:\"1\"`" + ` }
 type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
-//mobyextgen:service=Service
 var Point = extensions.DefinePoint[S]("test.gen.v1")
 `
 	pt, err := parseSource(t, src)
@@ -60,10 +59,9 @@ func TestServiceContractWithoutAPoint(t *testing.T) {
 type Req struct{ Name string ` + "`pb:\"1\"`" + ` }
 type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
 
-//mobyextgen:service=my.proto.pkg.v1.Runtime
 type Runtime interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
 `
-	pt, err := parseSource(t, contract)
+	pt, err := parseServiceSource(t, contract, "my.proto.pkg.v1.Runtime")
 	assert.NilError(t, err)
 	assert.Equal(t, pt.iface, "Runtime")
 	assert.Equal(t, pt.id, "my.proto.pkg.v1")
@@ -79,6 +77,40 @@ type Runtime interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
 	assert.Check(t, strings.Contains(src, "func NewClient(conn grpc.ClientConnInterface) p.Runtime"), src)
 	assert.Check(t, !strings.Contains(src, "ServerPoint"), "a non-point contract must not emit point registrations:\n%s", src)
 	assert.Check(t, !strings.Contains(src, "clientpoint"), "a non-point contract must not import the point packages:\n%s", src)
+	assert.Check(t, !strings.Contains(src, "servicev0"), "an unpublished contract must not emit typed publication APIs:\n%s", src)
+}
+
+func TestOrdinaryPointGeneratesPublicationAndClientAPIs(t *testing.T) {
+	const contract = `package p
+import "github.com/moby/extensions"
+type Req struct{ Name string ` + "`pb:\"1\"`" + ` }
+type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
+
+type Runtime interface {
+	Do(ctx interface{}, req *Req) (*Resp, error)
+	Delete(ctx interface{}, req *Req) error
+}
+var Point = extensions.DefinePoint[Runtime]("my.proto.pkg.v1")
+`
+	pt, err := parseSource(t, contract)
+	assert.NilError(t, err)
+	assert.Equal(t, pt.service, "Runtime")
+	assert.Equal(t, pt.grpcService(), "my.proto.pkg.v1.Runtime")
+	pt.importPath = "example.com/p"
+
+	wire, err := emitWire(pt)
+	assert.NilError(t, err)
+	src := string(wire)
+	assert.Check(t, strings.Contains(src, "var ServerPoint = serverpoint.Registration{"), src)
+	assert.Check(t, strings.Contains(src, "var ClientPoint = clientpoint.Registration{"), src)
+	assert.Check(t, strings.Contains(src, "func NewRuntimeClient(cc grpc.ClientConnInterface) RuntimeClient"),
+		"ordinary point must retain its raw gRPC client:\n%s", src)
+	assert.Check(t, strings.Contains(src, "func NewClient(conn grpc.ClientConnInterface) p.Runtime"),
+		"ordinary point must expose its handwritten client:\n%s", src)
+	assert.Check(t, !strings.Contains(src, "servicev0") && !strings.Contains(src, "func Bind("),
+		"ordinary Point transport must not contain extension-side publication bindings:\n%s", src)
+	assert.Check(t, !strings.Contains(src, "var Service") && !strings.Contains(src, "typedClient"),
+		"deleted typed-definition mode must not be generated:\n%s", src)
 }
 
 func TestReservedFieldNumbers(t *testing.T) {
@@ -87,11 +119,10 @@ import "github.com/moby/extensions"
 type S interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
 type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
 
-//mobyextgen:service=Service
 var Point = extensions.DefinePoint[S]("test.gen.v1")
 `
 	t.Run("emits reserved", func(t *testing.T) {
-		pt, err := parseSource(t, header+"\n//mobyextgen:reserved=2,4 were 'a' and 'b'\ntype Req struct{ Name string `pb:\"1\"` }\n")
+		pt, err := parseSource(t, header+"\ntype Req struct { Name string `pb:\"1\"`; _ struct{} `pb:\"2\"`; _ struct{} `pb:\"4\"` }\n")
 		assert.NilError(t, err)
 		pt.importPath = "example.com/p"
 		proto, err := emitProto(pt)
@@ -101,25 +132,27 @@ var Point = extensions.DefinePoint[S]("test.gen.v1")
 	})
 
 	t.Run("rejects a field reusing a reserved number", func(t *testing.T) {
-		pt, err := parseSource(t, header+"\n//mobyextgen:reserved=2\ntype Req struct{ Name string `pb:\"2\"` }\n")
-		assert.NilError(t, err)
-		pt.importPath = "example.com/p"
-		_, err = emitProto(pt)
-		assert.ErrorContains(t, err, "field number 2 is reserved")
+		_, err := parseSource(t, header+"\ntype Req struct { Name string `pb:\"2\"`; _ struct{} `pb:\"2\"` }\n")
+		assert.ErrorContains(t, err, "field number 2 is used by both")
 	})
 
 	t.Run("rejects a non-numeric reservation", func(t *testing.T) {
-		_, err := parseSource(t, header+"\n//mobyextgen:reserved=two\ntype Req struct{ Name string `pb:\"1\"` }\n")
-		assert.ErrorContains(t, err, "comma-separated list of field numbers")
+		_, err := parseSource(t, header+"\ntype Req struct { Name string `pb:\"1\"`; _ struct{} `pb:\"two\"` }\n")
+		assert.ErrorContains(t, err, "not a field number")
 	})
 
 	t.Run("rejects an oversized reservation", func(t *testing.T) {
-		_, err := parseSource(t, header+"\n//mobyextgen:reserved=536870912\ntype Req struct{ Name string `pb:\"1\"` }\n")
+		_, err := parseSource(t, header+"\ntype Req struct { Name string `pb:\"1\"`; _ struct{} `pb:\"536870912\"` }\n")
 		assert.ErrorContains(t, err, "must be <= 536870911")
 	})
 
+	t.Run("rejects a reservation with storage", func(t *testing.T) {
+		_, err := parseSource(t, header+"\ntype Req struct { Name string `pb:\"1\"`; _ string `pb:\"2\"` }\n")
+		assert.ErrorContains(t, err, "must use `_ struct{}`")
+	})
+
 	t.Run("descriptor accepts reservation boundaries", func(t *testing.T) {
-		pt, err := parseSource(t, header+"\n//mobyextgen:reserved=19000,536870911\ntype Req struct{ Name string `pb:\"1\"` }\n")
+		pt, err := parseSource(t, header+"\ntype Req struct { Name string `pb:\"1\"`; _ struct{} `pb:\"19000\"`; _ struct{} `pb:\"536870911\"` }\n")
 		assert.NilError(t, err)
 		fd, err := fileDescriptor(pt)
 		assert.NilError(t, err)
@@ -137,8 +170,6 @@ import "github.com/moby/extensions"
 type S interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
 type Req struct{ Name string ` + "`pb:\"1\"`" + ` }
 type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
-
-//mobyextgen:service=Service
 `
 	t.Run("DefineSinglePoint marks the ClientPoint", func(t *testing.T) {
 		pt, err := parseSource(t, contract+"var Point = extensions.DefineSinglePoint[S](\"test.gen.v1\")\n")

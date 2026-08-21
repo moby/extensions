@@ -1,4 +1,4 @@
-//go:generate go run github.com/moby/extensions/cmd/mobyextgen
+//go:generate go run github.com/moby/extensions/cmd/mobyextgen -service=moby.extension.runtime.v1.Extension
 
 // Package sdkapi defines the runtime protocol served by every out-of-process
 // extension. It is generated from this Go-first contract and is not an
@@ -11,12 +11,10 @@ import "context"
 
 // Extension is served by every out-of-process extension.
 //
-// The pragma names the gRPC service fully qualified because, unlike a point,
-// there is no id to take the proto package from. Both halves are wire
+// The generator command names the gRPC service fully qualified because, unlike
+// a point, there is no id to take the proto package from. Both halves are wire
 // identifiers: extensions built against them are separate binaries, possibly
 // built from an older tree, so neither may change without a new version.
-//
-//mobyextgen:service=moby.extension.runtime.v1.Extension
 type Extension interface {
 	// Describe returns the extension's declaration.
 	Describe(ctx context.Context, req *DescribeRequest) (*DescribeResponse, error)
@@ -47,10 +45,9 @@ type Declaration struct {
 	Providers    []PointDeclaration `pb:"2"`
 	Dependencies []Dependency       `pb:"3"`
 	Conflicts    []string           `pb:"4"`
-	// ExposedServices was the flat list of gRPC services registered by the
-	// extension process. It is kept for wire compatibility; new callers use
-	// ProviderServices and decide which point, if any, is public.
-	ExposedServices []string `pb:"5"`
+	// OfferedPoints lists implemented Points eligible for Host-controlled
+	// publication.
+	OfferedPoints []string `pb:"5"`
 	// ProviderServices records the fully-qualified gRPC service names registered
 	// while serving each provider point. All of these services are available on
 	// the per-extension socket for the daemon to call; only the host decides which
@@ -59,13 +56,12 @@ type Declaration struct {
 }
 
 // PointDeclaration names one point an extension provides.
-//
-//mobyextgen:reserved=2 was 'exclusive'; exposure covers sole-ownership
 type PointDeclaration struct {
 	ID string `pb:"1"`
 }
 
-// ProviderServices are the gRPC services registered while serving one point.
+// ProviderServices are the gRPC services registered while serving one ordinary
+// Point.
 type ProviderServices struct {
 	Point    string   `pb:"1"`
 	Services []string `pb:"2"`

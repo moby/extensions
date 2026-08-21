@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/moby/extensions"
+	servicev0 "github.com/moby/extensions/extpoints/service/v0"
 	"github.com/moby/extensions/sdk/sdkapi"
 	sdkapipb "github.com/moby/extensions/sdk/sdkapi/protogen"
 	"github.com/moby/extensions/serverpoint"
@@ -68,7 +69,6 @@ func TestRegisterRecordsServedServices(t *testing.T) {
 		ID:        "org.example.extension.v1",
 		Providers: []extensions.Provider{{Point: "org.example.point.v1", Impl: struct{}{}}},
 	}), served))
-	assert.Check(t, is.Len(srv.declaration.ExposedServices, 0))
 	assert.Check(t, is.Len(srv.declaration.ProviderServices, 1))
 	assert.Equal(t, srv.declaration.ProviderServices[0].Point, "org.example.point.v1")
 	assert.DeepEqual(t, srv.declaration.ProviderServices[0].Services, []string{"org.example.point.v1.Thing"})
@@ -84,6 +84,98 @@ func TestRegisterRecordsServedServices(t *testing.T) {
 	}), noService))
 	assert.Check(t, is.Len(plainSrv.declaration.ProviderServices, 1))
 	assert.Check(t, is.Len(plainSrv.declaration.ProviderServices[0].Services, 0))
+}
+
+func TestRegisterServesOfferedOrdinaryPoint(t *testing.T) {
+	fooPoint := extensions.DefinePoint[any]("org.example.foo.v1")
+	foo := generatedPointRegistration(fooPoint.ID(), "org.example.services.v1.Foo")
+	impl := struct{}{}
+	srv := NewServer()
+	err := srv.Register(extensions.New(extensions.Declaration{
+		ID: "org.example.extension.v1",
+		Providers: []extensions.Provider{
+			fooPoint.Provide(impl),
+			servicev0.Offer(fooPoint),
+		},
+	}), foo)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, srv.declaration.OfferedPoints, []string{string(foo.Point)})
+	assert.Check(t, is.Len(srv.declaration.Providers, 2))
+	assert.Check(t, is.Len(srv.declaration.ProviderServices, 1))
+	assert.Equal(t, srv.declaration.ProviderServices[0].Point, string(foo.Point))
+	assert.DeepEqual(t, srv.declaration.ProviderServices[0].Services, []string{"org.example.services.v1.Foo"})
+	assert.Check(t, is.Len(srv.grpc.GetServiceInfo(), 1))
+}
+
+func TestRegisterOffersSubsetOfOrdinaryPoints(t *testing.T) {
+	fooPoint := extensions.DefinePoint[any]("org.example.foo.v1")
+	barPoint := extensions.DefinePoint[any]("org.example.bar.v1")
+	foo := generatedPointRegistration(fooPoint.ID(), "org.example.services.v1.Foo")
+	bar := generatedPointRegistration(barPoint.ID(), "org.example.services.v1.Bar")
+	srv := NewServer()
+	err := srv.Register(extensions.New(extensions.Declaration{
+		ID: "org.example.extension.v1",
+		Providers: []extensions.Provider{
+			fooPoint.Provide(struct{}{}),
+			barPoint.Provide(struct{}{}),
+			servicev0.Offer(fooPoint),
+		},
+	}), foo, bar)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, srv.declaration.OfferedPoints, []string{string(foo.Point)})
+	assert.Check(t, is.Len(srv.declaration.ProviderServices, 2))
+	assert.Equal(t, srv.declaration.ProviderServices[0].Point, string(foo.Point))
+	assert.Equal(t, srv.declaration.ProviderServices[1].Point, string(bar.Point))
+	assert.Check(t, is.Len(srv.grpc.GetServiceInfo(), 2))
+}
+
+func TestRegisterRejectsServiceNameAttributedToDifferentPoints(t *testing.T) {
+	first := generatedPointRegistration("org.example.first.v1", "org.example.services.v1.Shared")
+	second := generatedPointRegistration("org.example.second.v1", "org.example.services.v1.Shared")
+	srv := NewServer()
+	err := srv.Register(extensions.New(extensions.Declaration{
+		ID: "org.example.extension.v1",
+		Providers: []extensions.Provider{
+			{Point: first.Point, Impl: struct{}{}},
+			{Point: second.Point, Impl: struct{}{}},
+		},
+	}), first, second)
+	assert.ErrorContains(t, err, `gRPC service "org.example.services.v1.Shared" is attributed to different points`)
+	assert.ErrorContains(t, err, `"org.example.first.v1" and "org.example.second.v1"`)
+	assert.Check(t, is.Len(srv.grpc.GetServiceInfo(), 1))
+}
+
+func TestRegisterRejectsUnimplementedOffer(t *testing.T) {
+	point := extensions.DefinePoint[any]("org.example.foo.v1")
+	srv := NewServer()
+	err := srv.Register(extensions.New(extensions.Declaration{
+		ID:        "org.example.extension.v1",
+		Providers: []extensions.Provider{servicev0.Offer(point)},
+	}))
+	assert.ErrorContains(t, err, `offered point "org.example.foo.v1" is not implemented`)
+}
+
+func TestRegisterRejectsOfferedPointWithoutService(t *testing.T) {
+	point := extensions.DefinePoint[any]("org.example.foo.v1")
+	srv := NewServer()
+	err := srv.Register(extensions.New(extensions.Declaration{
+		ID: "org.example.extension.v1",
+		Providers: []extensions.Provider{
+			point.Provide(struct{}{}),
+			servicev0.Offer(point),
+		},
+	}), serverpoint.Registration{Point: point.ID(), Register: func(grpc.ServiceRegistrar, any) {}})
+	assert.ErrorContains(t, err, `offered point "org.example.foo.v1" registered no gRPC service`)
+}
+
+func generatedPointRegistration(point extensions.PointID, service string) serverpoint.Registration {
+	desc := &grpc.ServiceDesc{ServiceName: service, HandlerType: (*any)(nil)}
+	return serverpoint.Registration{
+		Point: point,
+		Register: func(r grpc.ServiceRegistrar, impl any) {
+			r.RegisterService(desc, impl)
+		},
+	}
 }
 
 func TestRegisterRejectsUnknownPoint(t *testing.T) {

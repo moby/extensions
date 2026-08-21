@@ -30,7 +30,7 @@ type GreeterServer interface {
 var serviceDesc = grpc.ServiceDesc{
 	ServiceName: serviceName,
 	HandlerType: (*GreeterServer)(nil),
-	Metadata:    "internal/extensions/example/greeter/v0/greeter.proto",
+	Metadata:    "example/greeter/v0/greeter.proto",
 	Methods: []grpc.MethodDesc{
 		{MethodName: "Greet", Handler: handleGreet},
 	},
@@ -82,11 +82,16 @@ var ServerPoint = serverpoint.Registration{
 // ClientProvider builds a broker provider for the Greeter point from an
 // out-of-process gRPC connection.
 func ClientProvider(conn grpc.ClientConnInterface) extensions.Provider {
-	return greeterv0.Point.Provide(&grpcClient{client: NewGreeterClient(conn)})
+	return greeterv0.Point.Provide(NewClient(conn))
 }
 
 // ClientPoint registers ClientProvider for the Greeter point with a host.
 var ClientPoint = clientpoint.Registration{Point: greeterv0.Point.ID(), Provider: ClientProvider}
+
+// NewClient returns a greeterv0.Greeter that calls the Greeter point over conn.
+func NewClient(conn grpc.ClientConnInterface) greeterv0.Greeter {
+	return &grpcClient{client: NewGreeterClient(conn)}
+}
 
 // grpcServer serves an implementation of the contract's Go interface.
 type grpcServer struct {

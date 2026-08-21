@@ -28,6 +28,17 @@ func (id PointID) Name() string {
 // version. Segments may contain digits, hyphens, and underscores.
 var pointIDPattern = lazyRegexp(`^[a-z][a-z0-9]*(\.[a-z0-9_-]+)+\.v[0-9]+$`)
 
+// ValidatePointID reports whether id is a well-formed, versioned Point ID.
+func ValidatePointID(id PointID) error {
+	if id == "" {
+		return errors.New("point id is required")
+	}
+	if !pointIDPattern().MatchString(string(id)) {
+		return fmt.Errorf("invalid point id %q: want a versioned reverse-DNS name like org.example.api.v1", id)
+	}
+	return nil
+}
+
 // extensionIDPattern requires a lowercase reverse-DNS name with a mandatory vN
 // version. The version is a namespace element, not a semantic version: changing
 // com.foo.v1 to com.foo.v2 creates a new extension, binary, and configuration.
@@ -109,7 +120,7 @@ type Point[T any] struct {
 // DefinePoint binds id to provider interface T and panics for an invalid point
 // id. Point ids are fixed in source, so invalid ids are programming errors.
 func DefinePoint[T any](id PointID) Point[T] {
-	if !pointIDPattern().MatchString(string(id)) {
+	if ValidatePointID(id) != nil {
 		panic(fmt.Sprintf("extensions: invalid point id %q: want <tld>.<name>...vN, e.g. org.mobyproject.extension.volume.driver.v1", id))
 	}
 	return Point[T]{id: id}

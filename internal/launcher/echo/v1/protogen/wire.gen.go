@@ -30,7 +30,7 @@ type EchoServer interface {
 var serviceDesc = grpc.ServiceDesc{
 	ServiceName: serviceName,
 	HandlerType: (*EchoServer)(nil),
-	Metadata:    "internal/extensions/internal/launcher/echo/v1/echo.proto",
+	Metadata:    "internal/launcher/echo/v1/echo.proto",
 	Methods: []grpc.MethodDesc{
 		{MethodName: "Echo", Handler: handleEcho},
 	},
@@ -75,22 +75,27 @@ func (c *serviceClient) Echo(ctx context.Context, in *EchoRequest, opts ...grpc.
 var ServerPoint = serverpoint.Registration{
 	Point: echov1.Point.ID(),
 	Register: func(r grpc.ServiceRegistrar, impl any) {
-		r.RegisterService(&serviceDesc, &grpcServer{impl: impl.(echov1.EchoServer)})
+		r.RegisterService(&serviceDesc, &grpcServer{impl: impl.(echov1.Echo)})
 	},
 }
 
 // ClientProvider builds a broker provider for the Echo point from an
 // out-of-process gRPC connection.
 func ClientProvider(conn grpc.ClientConnInterface) extensions.Provider {
-	return echov1.Point.Provide(&grpcClient{client: NewEchoClient(conn)})
+	return echov1.Point.Provide(NewClient(conn))
 }
 
 // ClientPoint registers ClientProvider for the Echo point with a host.
 var ClientPoint = clientpoint.Registration{Point: echov1.Point.ID(), Provider: ClientProvider}
 
+// NewClient returns a echov1.Echo that calls the Echo point over conn.
+func NewClient(conn grpc.ClientConnInterface) echov1.Echo {
+	return &grpcClient{client: NewEchoClient(conn)}
+}
+
 // grpcServer serves an implementation of the contract's Go interface.
 type grpcServer struct {
-	impl echov1.EchoServer
+	impl echov1.Echo
 }
 
 func (s *grpcServer) Echo(ctx context.Context, req *EchoRequest) (*EchoResponse, error) {

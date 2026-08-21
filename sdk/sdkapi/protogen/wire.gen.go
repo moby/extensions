@@ -7,7 +7,7 @@ import (
 	grpc "google.golang.org/grpc"
 )
 
-// serviceName is the point's fully-qualified gRPC service name.
+// serviceName is the contract's fully-qualified gRPC service name.
 const serviceName = "moby.extension.runtime.v1.Extension"
 
 const (
@@ -15,21 +15,20 @@ const (
 	methodInitialize = "/" + serviceName + "/Initialize"
 )
 
-// ExtensionServer is the server side of the point's gRPC service. It is the
-// proto-level shape of the point, not the point's Go interface: a contract
+// ExtensionServer is the server side of the contract's gRPC service. It is the
+// proto-level shape of the service, not the handwritten Go interface: a contract
 // method returning a bare error returns an empty response message here.
 type ExtensionServer interface {
 	Describe(context.Context, *DescribeRequest) (*DescribeResponse, error)
 	Initialize(context.Context, *InitializeRequest) (*InitializeResponse, error)
 }
 
-// serviceDesc describes the point's gRPC service to a server. HandlerType is
-// what a registrar type-checks an implementation against, so registering the
-// wrong provider for this point is caught at registration.
+// serviceDesc describes the contract's raw gRPC service to a server.
+// HandlerType lets a registrar reject an incompatible server implementation.
 var serviceDesc = grpc.ServiceDesc{
 	ServiceName: serviceName,
 	HandlerType: (*ExtensionServer)(nil),
-	Metadata:    "internal/extensions/sdk/sdkapi/extension.proto",
+	Metadata:    "sdk/sdkapi/extension.proto",
 	Methods: []grpc.MethodDesc{
 		{MethodName: "Describe", Handler: handleDescribe},
 		{MethodName: "Initialize", Handler: handleInitialize},
@@ -64,15 +63,14 @@ func handleInitialize(srv any, ctx context.Context, dec func(any) error, interce
 	})
 }
 
-// ExtensionClient calls the point's gRPC service. It is exported so a client
-// outside the framework - one calling a service an extension publishes on the
-// API socket - can reach it with a plain gRPC client.
+// ExtensionClient calls the contract's raw gRPC service. It is exported so a client
+// outside the framework can reach the service with a plain gRPC client.
 type ExtensionClient interface {
 	Describe(ctx context.Context, in *DescribeRequest, opts ...grpc.CallOption) (*DescribeResponse, error)
 	Initialize(ctx context.Context, in *InitializeRequest, opts ...grpc.CallOption) (*InitializeResponse, error)
 }
 
-// NewExtensionClient returns a client for the point's gRPC service on cc.
+// NewExtensionClient returns a client for the contract's raw gRPC service on cc.
 func NewExtensionClient(cc grpc.ClientConnInterface) ExtensionClient { return &serviceClient{cc: cc} }
 
 type serviceClient struct{ cc grpc.ClientConnInterface }
@@ -157,7 +155,7 @@ func declarationToProto(in *sdkapi.Declaration) *Declaration {
 		out.Dependencies = append(out.Dependencies, dependencyToProto(&in.Dependencies[i]))
 	}
 	out.Conflicts = in.Conflicts
-	out.ExposedServices = in.ExposedServices
+	out.OfferedPoints = in.OfferedPoints
 	for i := range in.ProviderServices {
 		out.ProviderServices = append(out.ProviderServices, providerServicesToProto(&in.ProviderServices[i]))
 	}
@@ -177,7 +175,7 @@ func declarationFromProto(in *Declaration) *sdkapi.Declaration {
 		out.Dependencies = append(out.Dependencies, *dependencyFromProto(e))
 	}
 	out.Conflicts = in.GetConflicts()
-	out.ExposedServices = in.GetExposedServices()
+	out.OfferedPoints = in.GetOfferedPoints()
 	for _, e := range in.GetProviderServices() {
 		out.ProviderServices = append(out.ProviderServices, *providerServicesFromProto(e))
 	}

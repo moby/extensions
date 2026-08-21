@@ -42,6 +42,9 @@ type Launched struct {
 	Dependencies []extensions.Dependency
 	Conflicts    []extensions.ExtensionID
 	Points       []LaunchedPoint
+	// OfferedPoints are implemented Points eligible for Host-controlled
+	// publication.
+	OfferedPoints []extensions.PointID
 	// ProviderServices are the fully-qualified gRPC service names the extension
 	// serves for each provider point on its per-extension socket. The host, not
 	// the SDK, decides which point's services are also published on the daemon API
@@ -167,6 +170,7 @@ func (l Launcher) Launch(ctx context.Context, bin string) (*Launched, error) {
 		ID:               decl.ID,
 		Dependencies:     decl.Dependencies,
 		Conflicts:        decl.Conflicts,
+		OfferedPoints:    decl.OfferedPoints,
 		ProviderServices: decl.ProviderServices,
 		Conn:             conn,
 		shutdown:         &processShutdown{conn: conn, cmd: cmd, wait: wait, timeout: shutdownTimeout, lifetime: lifetime},

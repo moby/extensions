@@ -26,10 +26,12 @@ func emitWire(pt point) ([]byte, error) {
 	fmt.Fprintln(&b, `	grpc "google.golang.org/grpc"`)
 	fmt.Fprintln(&b, ")")
 
-	fmt.Fprintf(&b, `
-	// serviceName is the point's fully-qualified gRPC service name.
-	const serviceName = %q
-	`, pt.grpcService())
+	if pt.isPoint {
+		fmt.Fprintln(&b, "\n// serviceName is the point's fully-qualified gRPC service name.")
+	} else {
+		fmt.Fprintln(&b, "\n// serviceName is the contract's fully-qualified gRPC service name.")
+	}
+	fmt.Fprintf(&b, "const serviceName = %q\n", pt.grpcService())
 
 	fmt.Fprintln(&b, "\nconst (")
 	for _, m := range pt.methods {
@@ -37,22 +39,35 @@ func emitWire(pt point) ([]byte, error) {
 	}
 	fmt.Fprintln(&b, ")")
 
-	fmt.Fprintf(&b, `
+	if pt.isPoint {
+		fmt.Fprintf(&b, `
 	// %[1]sServer is the server side of the point's gRPC service. It is the
 	// proto-level shape of the point, not the point's Go interface: a contract
 	// method returning a bare error returns an empty response message here.
 	type %[1]sServer interface {
 	`, svc)
+	} else {
+		fmt.Fprintf(&b, `
+	// %[1]sServer is the server side of the contract's gRPC service. It is the
+	// proto-level shape of the service, not the handwritten Go interface: a contract
+	// method returning a bare error returns an empty response message here.
+	type %[1]sServer interface {
+	`, svc)
+	}
 	for _, m := range pt.methods {
 		fmt.Fprintf(&b, "\t%s(context.Context, *%s) (*%s, error)\n", m.name, m.request, m.response)
 	}
 	fmt.Fprintln(&b, "}")
 
-	fmt.Fprintf(&b, `
-	// serviceDesc describes the point's gRPC service to a server. HandlerType is
-	// what a registrar type-checks an implementation against, so registering the
-	// wrong provider for this point is caught at registration.
-	var serviceDesc = grpc.ServiceDesc{
+	if pt.isPoint {
+		fmt.Fprintln(&b, "\n// serviceDesc describes the point's gRPC service to a server. HandlerType is")
+		fmt.Fprintln(&b, "// what a registrar type-checks an implementation against, so registering the")
+		fmt.Fprintln(&b, "// wrong provider for this point is caught at registration.")
+	} else {
+		fmt.Fprintln(&b, "\n// serviceDesc describes the contract's raw gRPC service to a server.")
+		fmt.Fprintln(&b, "// HandlerType lets a registrar reject an incompatible server implementation.")
+	}
+	fmt.Fprintf(&b, `var serviceDesc = grpc.ServiceDesc{
 		ServiceName: serviceName,
 		HandlerType: (*%[1]sServer)(nil),
 		Metadata:    %[2]q,
@@ -81,20 +96,31 @@ func emitWire(pt point) ([]byte, error) {
 	`, handlerName(m), m.request, svc, m.name, methodConst(m))
 	}
 
-	fmt.Fprintf(&b, `
+	if pt.isPoint {
+		fmt.Fprintf(&b, `
 	// %[1]sClient calls the point's gRPC service. It is exported so a client
 	// outside the framework - one calling a service an extension publishes on the
 	// API socket - can reach it with a plain gRPC client.
 	type %[1]sClient interface {
 	`, svc)
+	} else {
+		fmt.Fprintf(&b, `
+	// %[1]sClient calls the contract's raw gRPC service. It is exported so a client
+	// outside the framework can reach the service with a plain gRPC client.
+	type %[1]sClient interface {
+	`, svc)
+	}
 	for _, m := range pt.methods {
 		fmt.Fprintf(&b, "\t%s(ctx context.Context, in *%s, opts ...grpc.CallOption) (*%s, error)\n", m.name, m.request, m.response)
 	}
 	fmt.Fprintln(&b, "}")
 
-	fmt.Fprintf(&b, `
-	// New%[1]sClient returns a client for the point's gRPC service on cc.
-	func New%[1]sClient(cc grpc.ClientConnInterface) %[1]sClient { return &serviceClient{cc: cc} }
+	if pt.isPoint {
+		fmt.Fprintf(&b, "\n// New%[1]sClient returns a client for the point's gRPC service on cc.\n", svc)
+	} else {
+		fmt.Fprintf(&b, "\n// New%[1]sClient returns a client for the contract's raw gRPC service on cc.\n", svc)
+	}
+	fmt.Fprintf(&b, `func New%[1]sClient(cc grpc.ClientConnInterface) %[1]sClient { return &serviceClient{cc: cc} }
 
 	type serviceClient struct{ cc grpc.ClientConnInterface }
 	`, svc)
@@ -125,11 +151,16 @@ func emitWire(pt point) ([]byte, error) {
 	// ClientProvider builds a broker provider for the %[1]s point from an
 	// out-of-process gRPC connection.
 	func ClientProvider(conn grpc.ClientConnInterface) extensions.Provider {
-		return %[2]s.Point.Provide(&grpcClient{client: New%[1]sClient(conn)})
+		return %[2]s.Point.Provide(NewClient(conn))
 	}
 
 	// ClientPoint registers ClientProvider for the %[1]s point with a host.%[4]s
 	var ClientPoint = clientpoint.Registration{Point: %[2]s.Point.ID(), Provider: ClientProvider%[5]s}
+
+	// NewClient returns a %[2]s.%[3]s that calls the %[1]s point over conn.
+	func NewClient(conn grpc.ClientConnInterface) %[2]s.%[3]s {
+		return &grpcClient{client: New%[1]sClient(conn)}
+	}
 	`, svc, cpkg, iface, singleDoc(pt), singleField(pt))
 	} else {
 		fmt.Fprintf(&b, `
@@ -144,7 +175,6 @@ func emitWire(pt point) ([]byte, error) {
 	}
 	`, svc, cpkg, iface)
 	}
-
 	fmt.Fprintf(&b, `
 	// grpcServer serves an implementation of the contract's Go interface.
 	type grpcServer struct {
@@ -180,7 +210,6 @@ func emitWire(pt point) ([]byte, error) {
 		client %sClient
 	}
 	`, svc)
-
 	for _, m := range pt.methods {
 		if m.bareError {
 			fmt.Fprintf(&b, `

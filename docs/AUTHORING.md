@@ -57,11 +57,8 @@ type HelloReply struct {
 	Message string `pb:"1"`
 }
 
-// Point binds the interface to a namespaced, versioned id. The pragma names the
-// point's gRPC service; it is part of the wire contract, so it lives here rather
-// than in a generator flag.
-//
-//mobyextgen:service=Greeter
+// Point binds the interface to a namespaced, versioned id. Mobyextgen infers
+// the gRPC service as <PointID>.<InterfaceName>.
 var Point = extensions.DefinePoint[Greeter]("org.mobyproject.extension.example.greeter.v0")
 
 // Greet resolves the provider and calls it.
@@ -73,6 +70,22 @@ func Greet(ctx context.Context, resolver extensions.Resolver, req *HelloRequest)
 	return g.Greet(ctx, req)
 }
 ```
+
+The interface name is the gRPC service-name component. Keep it stable within a
+Point version. If a clearer Go name is useful, add an alias without changing the
+type used by `DefinePoint`:
+
+```go
+type LegacyGreeter interface {
+	Greet(context.Context, *HelloRequest) (*HelloReply, error)
+}
+
+type Greeter = LegacyGreeter
+
+var Point = extensions.DefinePoint[LegacyGreeter]("org.example.greeter.v0")
+```
+
+Changing the wire service name requires a new Point version.
 
 Before coding, record the id and version, resolution shape and cardinality, ordering, call/veto semantics, dependencies, and failure policy.
 The detailed rules are [DESIGN.md](./DESIGN.md#resolution-ordering-and-lifecycle); the authoring-specific choices are:
@@ -108,17 +121,9 @@ The detailed rules are [DESIGN.md](./DESIGN.md#resolution-ordering-and-lifecycle
 Supported fields are scalar values, `string`, `[]byte`, repeated scalars such as `[]string`, string-keyed scalar maps, pointer nested messages such as `*Other`, and repeated nested messages such as `[]Other`.
 A single nested message must be a pointer; the generator rejects a value field.
 
-When deleting a field, burn its number and record it on the message:
-
-```go
-//mobyextgen:reserved=2 was 'exclusive'; exposure covers sole-ownership
-type PointDeclaration struct {
-	ID string `pb:"1"`
-}
-```
-
-The generator emits `reserved 2;` and rejects later reuse.
-For proto3 presence, unsupported types, and the complete compatibility rules, see [DESIGN.md#wire-contract-and-compatibility](./DESIGN.md#wire-contract-and-compatibility).
+The current framework is experimental and does not preserve compatibility for
+removed fields. For proto3 presence, unsupported types, and wire-shape rules,
+see [DESIGN.md#wire-contract](./DESIGN.md#wire-contract).
 
 Points the engine offers to extensions use the same interface shape; only caller direction changes.
 
@@ -134,8 +139,18 @@ It is identical for every point; there are no paths to adjust:
 package <name>v0
 ```
 
-`mobyextgen` reads the Go contract and writes the `.proto`, protobuf message code, and `wire.gen.go`; it derives the import path from `go.mod` and the proto file name from `mobyextgen:service`.
+`mobyextgen` reads the Go contract at generation time and writes the `.proto`,
+protobuf message code, and `wire.gen.go`.
+For an ordinary Point, it infers the gRPC service name as `<PointID>.<InterfaceName>`.
+The generated package exports:
+
+- `ServerPoint`, for serving the point to an SDK server or a dependency callback;
+- `ClientPoint`, for host wiring to a launched provider;
+- `NewClient(conn)`, which returns the handwritten Go interface over a gRPC connection.
+
 The contract package does not import protobuf packages; generated code belongs in `protogen/`.
+The generator derives the import path from `go.mod` and the proto file name
+from the inferred service identity.
 
 ### 3. Generate and validate
 
@@ -340,7 +355,7 @@ Health checks, reconnect, and restart are future work in [ROADMAP.md](./ROADMAP.
 ## Author checklist
 
 - [ ] Put the hand-written contract under `extpoints/<area>/<name>/v<N>/`.
-- [ ] Use a valid point id, stable `pb` field numbers, and a service pragma.
+- [ ] For an ordinary Point, use a valid point id and stable interface name and `pb` field numbers; let the generator infer the service name.
 - [ ] Define resolution/cardinality, ordering, call/veto, dependency, and failure behavior in the point contract.
 - [ ] Generate and commit `.proto` and `protogen/` output.
 - [ ] Call a helper from the engine flow, passing the host resolver.

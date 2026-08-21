@@ -8,7 +8,6 @@ import (
 	"go/token"
 	"os"
 	"reflect"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +18,14 @@ import (
 // parsing
 
 func parsePoint(dir string) (point, error) {
+	return parseContract(dir, "")
+}
+
+func parseService(dir, identity string) (point, error) {
+	return parseContract(dir, identity)
+}
+
+func parseContract(dir, serviceIdentity string) (point, error) {
 	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
 		return !strings.HasSuffix(fi.Name(), "_test.go")
@@ -44,19 +51,22 @@ func parsePoint(dir string) (point, error) {
 
 	pt := point{pkgName: pkgName}
 
-	svc, err := findServicePragma(files)
-	if err != nil {
-		return point{}, err
-	}
-	pt.service = svc.service
-	if svc.iface != "" {
-		pt.iface, pt.id = svc.iface, svc.pkg
+	if serviceIdentity != "" {
+		pkg, service, ok := splitServiceIdentity(serviceIdentity)
+		if !ok {
+			return point{}, fmt.Errorf("service name %q must be fully qualified", serviceIdentity)
+		}
+		if _, _, _, pointErr := findDefinePoint(files); pointErr == nil {
+			return point{}, errors.New("the -service option cannot be used with an ordinary Point contract")
+		}
+		pt.iface, pt.id, pt.service = service, pkg, service
 	} else {
 		iface, id, single, err := findDefinePoint(files)
 		if err != nil {
 			return point{}, err
 		}
 		pt.iface, pt.id, pt.isPoint, pt.isSingle = iface, id, true, single
+		pt.service = iface
 	}
 
 	msgNames := messageNames(files)
@@ -121,105 +131,12 @@ func findDefinePoint(files []*ast.File) (iface, id string, single bool, err erro
 	return iface, id, single, nil
 }
 
-// servicePragma declares a contract's gRPC service name, and reservedPragma
-// preserves a removed field number.
-//
-//	//mobyextgen:service=CreateSpecHook
-//	var Point = extensions.DefinePoint[Hook]("...create_spec.v0")
-//
-//	//mobyextgen:reserved=2
-//	type PointDeclaration struct{ ... }
-const (
-	servicePragma  = "//mobyextgen:service="
-	reservedPragma = "//mobyextgen:reserved="
-)
-
-// serviceDecl is the service pragma result. Point mode supplies only service;
-// service mode supplies the interface and fully-qualified proto package too.
-type serviceDecl struct {
-	service string
-	iface   string
-	pkg     string
-}
-
-// findServicePragma returns the declared gRPC service. The name is required in
-// source because it may differ from the Go interface name and is part of the
-// wire contract. An interface pragma is fully qualified; a point pragma is not.
-func findServicePragma(files []*ast.File) (serviceDecl, error) {
-	var found serviceDecl
-	var seen string
-	for _, f := range files {
-		for _, decl := range f.Decls {
-			gd, ok := decl.(*ast.GenDecl)
-			if !ok {
-				continue
-			}
-			for _, spec := range gd.Specs {
-				values := declPragmas(gd, spec, servicePragma)
-				if len(values) == 0 {
-					continue
-				}
-				for _, value := range values {
-					if seen != "" && seen != value {
-						return serviceDecl{}, fmt.Errorf("conflicting %s pragmas: %q and %q", servicePragma, seen, value)
-					}
-					seen = value
-				}
-				value := values[0]
-
-				ts, isType := spec.(*ast.TypeSpec)
-				if !isType {
-					found = serviceDecl{service: value}
-					continue
-				}
-				if _, isIface := ts.Type.(*ast.InterfaceType); !isIface {
-					return serviceDecl{}, fmt.Errorf("%s on %s: the pragma may only document an interface or the point", servicePragma, ts.Name.Name)
-				}
-				pkg, service, ok := strings.Cut(reverse(value), ".")
-				if !ok {
-					return serviceDecl{}, fmt.Errorf("%s on interface %s: want a fully-qualified name like my.proto.package.%s", servicePragma, ts.Name.Name, ts.Name.Name)
-				}
-				found = serviceDecl{service: reverse(pkg), iface: ts.Name.Name, pkg: reverse(service)}
-			}
-		}
+func splitServiceIdentity(identity string) (pkg, service string, ok bool) {
+	dot := strings.LastIndexByte(identity, '.')
+	if dot <= 0 || dot == len(identity)-1 {
+		return "", "", false
 	}
-	if seen == "" {
-		return serviceDecl{}, fmt.Errorf("no service pragma found; declare the contract's gRPC service name as `%s<Name>` next to its DefinePoint call, or fully qualified on its service interface", servicePragma)
-	}
-	return found, nil
-}
-
-// reverse returns s with its bytes reversed.
-func reverse(s string) string {
-	b := []byte(s)
-	for i, j := 0, len(b)-1; i < j; i, j = i+1, j-1 {
-		b[i], b[j] = b[j], b[i]
-	}
-	return string(b)
-}
-
-// declPragmas returns all values of pragma on spec and its enclosing declaration.
-// Returning all values lets callers reject conflicting declarations.
-func declPragmas(gd *ast.GenDecl, spec ast.Spec, pragma string) []string {
-	docs := []*ast.CommentGroup{gd.Doc}
-	switch sp := spec.(type) {
-	case *ast.TypeSpec:
-		docs = append(docs, sp.Doc)
-	case *ast.ValueSpec:
-		docs = append(docs, sp.Doc)
-	}
-	var values []string
-	for _, doc := range docs {
-		if doc == nil {
-			continue
-		}
-		for _, c := range doc.List {
-			if value, ok := strings.CutPrefix(c.Text, pragma); ok {
-				values = append(values, strings.TrimSpace(value))
-			}
-		}
-	}
-	return values
+	return identity[:dot], identity[dot+1:], true
 }
 
 func findInterface(files []*ast.File, name string) *ast.InterfaceType {
@@ -271,7 +188,8 @@ func structHasPBTag(st *ast.StructType) bool {
 	for _, f := range st.Fields.List {
 		// Keep malformed tags classified as message fields so parseMessage reports
 		// the tag instead of silently ignoring the struct.
-		if _, present, _ := pbNumber(f); present {
+		reservation := len(f.Names) == 1 && f.Names[0].Name == "_"
+		if _, present, _ := pbNumber(f, reservation); present {
 			return true
 		}
 	}
@@ -329,9 +247,6 @@ func parseMessages(files []*ast.File, msgNames map[string]bool) ([]message, erro
 				if err != nil {
 					return nil, err
 				}
-				if msg.reserved, err = parseReserved(gd, spec); err != nil {
-					return nil, fmt.Errorf("%s: %w", ts.Name.Name, err)
-				}
 				messages = append(messages, msg)
 			}
 		}
@@ -340,39 +255,12 @@ func parseMessages(files []*ast.File, msgNames map[string]bool) ([]message, erro
 	return messages, nil
 }
 
-// parseReserved returns field numbers burned by removed fields. Proto forbids
-// reusing them because old peers may decode new bytes as the old field.
-//
-//	//mobyextgen:reserved=2 // was 'exclusive'
-//	type PointDeclaration struct{ ... }
-func parseReserved(gd *ast.GenDecl, spec ast.Spec) ([]int, error) {
-	var numbers []int
-	for _, value := range declPragmas(gd, spec, reservedPragma) {
-		list, _, _ := strings.Cut(value, " ")
-		for f := range strings.SplitSeq(list, ",") {
-			parsed, err := strconv.ParseInt(strings.TrimSpace(f), 10, 64)
-			if err != nil {
-				return nil, fmt.Errorf("%s%s: want a comma-separated list of field numbers", reservedPragma, value)
-			}
-			if parsed < int64(protowire.MinValidNumber) {
-				return nil, fmt.Errorf("reserved field number must be >= 1, got %d", parsed)
-			}
-			if parsed > int64(protowire.MaxValidNumber) {
-				return nil, fmt.Errorf("reserved field number must be <= %d, got %d", protowire.MaxValidNumber, parsed)
-			}
-			n := int(parsed)
-			numbers = append(numbers, n)
-		}
-	}
-	sort.Ints(numbers)
-	return slices.Compact(numbers), nil
-}
-
 func parseMessage(name string, st *ast.StructType, msgNames map[string]bool) (message, error) {
 	msg := message{name: name}
 	byNumber := map[int]string{} // field number -> Go field name, to catch reuse
 	for _, f := range st.Fields.List {
-		num, present, err := pbNumber(f)
+		reserved := len(f.Names) == 1 && f.Names[0].Name == "_"
+		num, present, err := pbNumber(f, reserved)
 		if err != nil {
 			field := "field"
 			if len(f.Names) > 0 {
@@ -395,6 +283,14 @@ func parseMessage(name string, st *ast.StructType, msgNames map[string]bool) (me
 			return message{}, fmt.Errorf("%s: pb field number %d is used by both %s and %s", name, num, prev, goName)
 		}
 		byNumber[num] = goName
+		if reserved {
+			empty, ok := f.Type.(*ast.StructType)
+			if !ok || len(empty.Fields.List) != 0 {
+				return message{}, fmt.Errorf("%s: reserved field number %d must use `_ struct{}`", name, num)
+			}
+			msg.reserved = append(msg.reserved, num)
+			continue
+		}
 		protoName := camelToSnake(goName)
 		fl := field{goName: goName, protoName: protoName, protoGoName: goCamelCase(protoName), number: num}
 		if err := classify(f.Type, msgNames, &fl); err != nil {
@@ -403,6 +299,7 @@ func parseMessage(name string, st *ast.StructType, msgNames map[string]bool) (me
 		msg.fields = append(msg.fields, fl)
 	}
 	sort.Slice(msg.fields, func(i, j int) bool { return msg.fields[i].number < msg.fields[j].number })
+	sort.Ints(msg.reserved)
 	return msg, nil
 }
 
@@ -475,8 +372,9 @@ func classify(expr ast.Expr, msgNames map[string]bool, fl *field) error {
 }
 
 // pbNumber returns a field's number and whether a pb tag is present. A malformed
-// tag is present with an error, rather than being treated as absent.
-func pbNumber(f *ast.Field) (n int, present bool, err error) {
+// tag is present with an error, rather than being treated as absent. Reservations
+// may name protobuf's implementation-reserved range because they emit no field.
+func pbNumber(f *ast.Field, reservation bool) (n int, present bool, err error) {
 	if f.Tag == nil {
 		return 0, false, nil
 	}
@@ -498,7 +396,7 @@ func pbNumber(f *ast.Field) (n int, present bool, err error) {
 	if parsed > int64(protowire.MaxValidNumber) {
 		return 0, true, fmt.Errorf("pb field number must be <= %d, got %d", protowire.MaxValidNumber, parsed)
 	}
-	if parsed >= int64(protowire.FirstReservedNumber) && parsed <= int64(protowire.LastReservedNumber) {
+	if !reservation && parsed >= int64(protowire.FirstReservedNumber) && parsed <= int64(protowire.LastReservedNumber) {
 		return 0, true, fmt.Errorf("pb field number %d is reserved by the protobuf implementation", parsed)
 	}
 	return int(parsed), true, nil

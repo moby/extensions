@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/moby/extensions"
+	servicev0 "github.com/moby/extensions/extpoints/service/v0"
 	"github.com/moby/extensions/sdk/sdkapi"
 )
 
@@ -15,6 +16,7 @@ type Declaration struct {
 	Dependencies     []extensions.Dependency
 	Conflicts        []extensions.ExtensionID
 	Points           []extensions.PointID
+	OfferedPoints    []extensions.PointID
 	ProviderServices map[extensions.PointID][]string
 }
 
@@ -38,6 +40,12 @@ func Parse(name string, decl *sdkapi.Declaration) (*Declaration, error) {
 		out.Points = append(out.Points, extensions.PointID(point.ID))
 	}
 	if err := ValidateServices(name, out.Points, out.ProviderServices); err != nil {
+		return nil, err
+	}
+	for _, point := range decl.OfferedPoints {
+		out.OfferedPoints = append(out.OfferedPoints, extensions.PointID(point))
+	}
+	if err := ValidateOffers(name, out.Points, out.OfferedPoints, out.ProviderServices); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -98,6 +106,35 @@ func ValidateServices(name string, points []extensions.PointID, services map[ext
 	for point := range services {
 		if !declared[point] {
 			return fmt.Errorf("extension %q serves services for point %q without declaring it", name, point)
+		}
+	}
+	return nil
+}
+
+// ValidateOffers rejects malformed, duplicate, unimplemented, and unserved
+// offered Points.
+func ValidateOffers(name string, points, offered []extensions.PointID, services map[extensions.PointID][]string) error {
+	declared := make(map[extensions.PointID]bool, len(points))
+	for _, point := range points {
+		declared[point] = true
+	}
+	seen := make(map[extensions.PointID]bool, len(offered))
+	for _, point := range offered {
+		if err := extensions.ValidatePointID(point); err != nil {
+			return fmt.Errorf("extension %q offered an invalid point: %w", name, err)
+		}
+		if point == servicev0.Point.ID() {
+			return fmt.Errorf("extension %q cannot offer publication metadata point %q", name, point)
+		}
+		if seen[point] {
+			return fmt.Errorf("extension %q offered point %q more than once", name, point)
+		}
+		seen[point] = true
+		if !declared[point] {
+			return fmt.Errorf("extension %q offered point %q without implementing it", name, point)
+		}
+		if len(services[point]) == 0 {
+			return fmt.Errorf("extension %q offered point %q without reporting a service", name, point)
 		}
 	}
 	return nil

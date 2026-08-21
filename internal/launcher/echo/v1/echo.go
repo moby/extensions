@@ -9,8 +9,8 @@ import (
 	"github.com/moby/extensions"
 )
 
-// EchoServer is the provider interface for the echo test point.
-type EchoServer interface {
+// Echo is the provider interface for the echo test point.
+type Echo interface {
 	// Echo returns the request message or an error when it is empty.
 	Echo(ctx context.Context, req *EchoRequest) (*EchoResponse, error)
 }
@@ -26,6 +26,4 @@ type EchoResponse struct {
 }
 
 // Point is the echo test point used by launcher tests.
-//
-//mobyextgen:service=Echo
-var Point = extensions.DefinePoint[EchoServer]("moby.extensions.internal.launcher.echo.v1")
+var Point = extensions.DefinePoint[Echo]("moby.extensions.internal.launcher.echo.v1")

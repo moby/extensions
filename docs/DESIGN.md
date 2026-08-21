@@ -3,6 +3,8 @@
 This document is the authoritative description of current behavior and constraints.
 See the [principles](./README.md#principles), [glossary](./README.md#glossary), and procedural [authoring guide](./AUTHORING.md).
 Runtime reload, out-of-process health handling, and scoped dependency resolvers are not current behavior.
+The framework and runtime protocol are experimental and currently make no
+backward-compatibility promise.
 
 ## Contract and startup
 
@@ -33,9 +35,10 @@ These names are distinct:
 - **Point id** identifies a versioned interface contract, for example `com.docker.compose.api.v1`.
   It is a lowercase, dot-separated, reverse-DNS-style name ending in `vN`; segments may contain digits, hyphens, and underscores.
   Providers implement points, and point dependencies name their ids.
-- **Proto package / gRPC service** is generated from a point.
-  The point id becomes the `.proto` package, and each service is named `<point-id>.<Service>`.
-  For example, point `org.mobyproject.extension.container.create_hook.v0` generates service `org.mobyproject.extension.container.create_hook.v0.ContainerCreateHook` and wire methods of the form `/pkg.Service/Method`.
+- **Proto package / gRPC service** is generated from an ordinary Point.
+  The point id becomes the `.proto` package, and the service is named `<PointID>.<InterfaceName>`.
+  For example, point `org.mobyproject.extension.container.create_hook.v0` generates service `org.mobyproject.extension.container.create_hook.v0.ContainerCreateHook` and wire methods of the form `/<PointID>.<InterfaceName>/Method`.
+  Both the point id and interface name are wire identifiers and remain stable within that Point version.
   Socket routing uses the full service name, never the bare point id.
 - **CLI / API route** is a separate client-facing name, such as `docker compose up` or a REST path; the framework does not generate it.
 
@@ -125,7 +128,7 @@ The generated client adapter presents the same Go interface to the host.
 A dead process produces gRPC errors until the daemon restarts.
 There is no watchdog, reconnect loop, or restart policy.
 
-## Wire contract and compatibility
+## Wire contract
 
 The Go interface and message structs are the source of truth.
 `mobyextgen` generates the proto, protobuf message code, gRPC service, client and server points, adapters, and conversions without `protoc`, plugins, or other `PATH` tools.
@@ -142,10 +145,9 @@ Optional scalars, `oneof`, enums, and well-known types such as timestamp and dur
 Use a Unix `int64` time, documented string enum-like values, or a `bytes` / JSON payload instead.
 There is no typed error schema: Go `error` crosses gRPC as a status, and each point documents its meaning, such as a veto.
 
-Within `.v1`, add fields with new numbers; never renumber or reuse a number, or change a field's type.
-Old peers ignore added fields, while new peers see zero values when talking to old peers.
-Deleting a field burns its number: record it with `mobyextgen:reserved` so the generator emits `reserved N;` and rejects reuse.
-Breaking changes require a new `.vN`; `.v0` remains experimental.
+The current protocol may renumber, remove, or change fields without migration
+handling. Once a contract is declared stable, field numbers and types become
+permanent and breaking changes require a new `.vN`.
 
 ## Discovery security
 

@@ -15,12 +15,18 @@ func parseSource(t *testing.T, src string) (point, error) {
 	return parsePoint(dir)
 }
 
+func parseServiceSource(t *testing.T, src, service string) (point, error) {
+	t.Helper()
+	dir := t.TempDir()
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "contract.go"), []byte(src), 0o644))
+	return parseService(dir, service)
+}
+
 func TestContractValidation(t *testing.T) {
 	const header = `package p
 import "github.com/moby/extensions"
 type S interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
 type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
-//mobyextgen:service=Service
 var Point = extensions.DefinePoint[S]("test.gen.v1")
 `
 	cases := []struct {
@@ -116,39 +122,44 @@ var Point = extensions.DefinePoint[S]("test.gen.v1")
 	}
 }
 
-func TestServicePragma(t *testing.T) {
+func TestPointServiceName(t *testing.T) {
 	const contract = `package p
 import "github.com/moby/extensions"
 type S interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
 type Req struct{ Name string ` + "`pb:\"1\"`" + ` }
 type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
 `
-	t.Run("names the service", func(t *testing.T) {
-		pt, err := parseSource(t, contract+"//mobyextgen:service=SomeHook\nvar Point = extensions.DefinePoint[S](\"test.gen.v1\")\n")
-		assert.NilError(t, err)
-		assert.Equal(t, pt.service, "SomeHook")
-		assert.Equal(t, pt.grpcService(), "test.gen.v1.SomeHook")
-	})
-
-	t.Run("is required", func(t *testing.T) {
-		_, err := parseSource(t, contract+"var Point = extensions.DefinePoint[S](\"test.gen.v1\")\n")
-		assert.ErrorContains(t, err, "no service pragma found")
-	})
-
-	t.Run("rejects conflicting names", func(t *testing.T) {
-		_, err := parseSource(t, contract+"//mobyextgen:service=A\n//mobyextgen:service=B\nvar Point = extensions.DefinePoint[S](\"test.gen.v1\")\n")
-		assert.ErrorContains(t, err, "conflicting")
-	})
+	pt, err := parseSource(t, contract+"var Point = extensions.DefinePoint[S](\"test.gen.v1\")\n")
+	assert.NilError(t, err)
+	assert.Equal(t, pt.service, "S")
+	assert.Equal(t, pt.grpcService(), "test.gen.v1.S")
 }
 
-func TestServicePragmaOnANonInterface(t *testing.T) {
-	_, err := parseSource(t, `package p
-type Req struct{ Name string `+"`pb:\"1\"`"+` }
-type Resp struct{ Ok bool `+"`pb:\"1\"`"+` }
-type S interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
+func TestExplicitNonPointService(t *testing.T) {
+	const contract = `package p
+type Req struct{ Name string ` + "`pb:\"1\"`" + ` }
+type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
+type Runtime interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
+`
+	pt, err := parseServiceSource(t, contract, "example.api.v1.Runtime")
+	assert.NilError(t, err)
+	assert.Equal(t, pt.iface, "Runtime")
+	assert.Equal(t, pt.id, "example.api.v1")
+	assert.Equal(t, pt.service, "Runtime")
+	assert.Check(t, !pt.isPoint)
 
-//mobyextgen:service=my.pkg.v1.Thing
-type Thing struct{}
-`)
-	assert.ErrorContains(t, err, "may only document an interface or the point")
+	_, err = parseServiceSource(t, contract, "Runtime")
+	assert.ErrorContains(t, err, "must be fully qualified")
+}
+
+func TestExplicitServiceRejectsPointContract(t *testing.T) {
+	_, err := parseServiceSource(t, `package p
+import "github.com/moby/extensions"
+type Req struct{}
+type Resp struct{}
+type Runtime interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
+
+var Point = extensions.DefinePoint[Runtime]("example.api.v1")
+`, "example.api.v1.Runtime")
+	assert.ErrorContains(t, err, "cannot be used with an ordinary Point")
 }

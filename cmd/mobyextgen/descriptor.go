@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	gengo "google.golang.org/protobuf/cmd/protoc-gen-go/internal_gengo"
 	"google.golang.org/protobuf/compiler/protogen"
@@ -43,7 +44,11 @@ func emitMessages(pt point) ([]byte, error) {
 	if len(resp.File) != 1 {
 		return nil, fmt.Errorf("expected 1 generated protobuf file, got %d", len(resp.File))
 	}
-	return []byte(resp.File[0].GetContent()), nil
+	content := resp.File[0].GetContent()
+	// Keep generated code aligned with the module's Go version until
+	// protoc-gen-go emits reflect.TypeFor itself.
+	content = strings.Replace(content, "reflect.TypeOf(x{}).PkgPath()", "reflect.TypeFor[x]().PkgPath()", 1)
+	return []byte(content), nil
 }
 
 // fileDescriptor builds the descriptor corresponding to [emitProto].

@@ -23,5 +23,4 @@ type Nested struct {
 	Value string `pb:"1"`
 }
 
-//mobyextgen:service=Service
 var Point = extensions.DefinePoint[Service]("test.singlemsg.v1")

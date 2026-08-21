@@ -25,7 +25,6 @@ type HelloReply struct {
 	Message string `pb:"1"`
 }
 
-//mobyextgen:service=Greeter
 var Point = extensions.DefinePoint[Greeter]("org.mobyproject.extension.example.greeter.v0")
 
 // Greet calls the greeter provider.

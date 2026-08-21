@@ -2,17 +2,16 @@
 // versions:
 // 	protoc-gen-go v1.36.11-devel
 // 	protoc        (unknown)
-// source: internal/extensions/internal/launcher/echo/v1/echo.proto
+// source: internal/launcher/echo/v1/echo.proto
 
 package protogen
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -31,7 +30,7 @@ type EchoRequest struct {
 
 func (x *EchoRequest) Reset() {
 	*x = EchoRequest{}
-	mi := &file_internal_extensions_internal_launcher_echo_v1_echo_proto_msgTypes[0]
+	mi := &file_internal_launcher_echo_v1_echo_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -43,7 +42,7 @@ func (x *EchoRequest) String() string {
 func (*EchoRequest) ProtoMessage() {}
 
 func (x *EchoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_extensions_internal_launcher_echo_v1_echo_proto_msgTypes[0]
+	mi := &file_internal_launcher_echo_v1_echo_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -56,7 +55,7 @@ func (x *EchoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EchoRequest.ProtoReflect.Descriptor instead.
 func (*EchoRequest) Descriptor() ([]byte, []int) {
-	return file_internal_extensions_internal_launcher_echo_v1_echo_proto_rawDescGZIP(), []int{0}
+	return file_internal_launcher_echo_v1_echo_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *EchoRequest) GetMessage() string {
@@ -75,7 +74,7 @@ type EchoResponse struct {
 
 func (x *EchoResponse) Reset() {
 	*x = EchoResponse{}
-	mi := &file_internal_extensions_internal_launcher_echo_v1_echo_proto_msgTypes[1]
+	mi := &file_internal_launcher_echo_v1_echo_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -87,7 +86,7 @@ func (x *EchoResponse) String() string {
 func (*EchoResponse) ProtoMessage() {}
 
 func (x *EchoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_extensions_internal_launcher_echo_v1_echo_proto_msgTypes[1]
+	mi := &file_internal_launcher_echo_v1_echo_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -100,7 +99,7 @@ func (x *EchoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EchoResponse.ProtoReflect.Descriptor instead.
 func (*EchoResponse) Descriptor() ([]byte, []int) {
-	return file_internal_extensions_internal_launcher_echo_v1_echo_proto_rawDescGZIP(), []int{1}
+	return file_internal_launcher_echo_v1_echo_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *EchoResponse) GetMessage() string {
@@ -110,11 +109,11 @@ func (x *EchoResponse) GetMessage() string {
 	return ""
 }
 
-var File_internal_extensions_internal_launcher_echo_v1_echo_proto protoreflect.FileDescriptor
+var File_internal_launcher_echo_v1_echo_proto protoreflect.FileDescriptor
 
-const file_internal_extensions_internal_launcher_echo_v1_echo_proto_rawDesc = "" +
+const file_internal_launcher_echo_v1_echo_proto_rawDesc = "" +
 	"\n" +
-	"8internal/extensions/internal/launcher/echo/v1/echo.proto\x12)moby.extensions.internal.launcher.echo.v1\"'\n" +
+	"$internal/launcher/echo/v1/echo.proto\x12)moby.extensions.internal.launcher.echo.v1\"'\n" +
 	"\vEchoRequest\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"(\n" +
 	"\fEchoResponse\x12\x18\n" +
@@ -123,23 +122,23 @@ const file_internal_extensions_internal_launcher_echo_v1_echo_proto_rawDesc = ""
 	"\x04Echo\x126.moby.extensions.internal.launcher.echo.v1.EchoRequest\x1a7.moby.extensions.internal.launcher.echo.v1.EchoResponseB?Z=github.com/moby/extensions/internal/launcher/echo/v1/protogenb\x06proto3"
 
 var (
-	file_internal_extensions_internal_launcher_echo_v1_echo_proto_rawDescOnce sync.Once
-	file_internal_extensions_internal_launcher_echo_v1_echo_proto_rawDescData []byte
+	file_internal_launcher_echo_v1_echo_proto_rawDescOnce sync.Once
+	file_internal_launcher_echo_v1_echo_proto_rawDescData []byte
 )
 
-func file_internal_extensions_internal_launcher_echo_v1_echo_proto_rawDescGZIP() []byte {
-	file_internal_extensions_internal_launcher_echo_v1_echo_proto_rawDescOnce.Do(func() {
-		file_internal_extensions_internal_launcher_echo_v1_echo_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_extensions_internal_launcher_echo_v1_echo_proto_rawDesc), len(file_internal_extensions_internal_launcher_echo_v1_echo_proto_rawDesc)))
+func file_internal_launcher_echo_v1_echo_proto_rawDescGZIP() []byte {
+	file_internal_launcher_echo_v1_echo_proto_rawDescOnce.Do(func() {
+		file_internal_launcher_echo_v1_echo_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_launcher_echo_v1_echo_proto_rawDesc), len(file_internal_launcher_echo_v1_echo_proto_rawDesc)))
 	})
-	return file_internal_extensions_internal_launcher_echo_v1_echo_proto_rawDescData
+	return file_internal_launcher_echo_v1_echo_proto_rawDescData
 }
 
-var file_internal_extensions_internal_launcher_echo_v1_echo_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_internal_extensions_internal_launcher_echo_v1_echo_proto_goTypes = []any{
+var file_internal_launcher_echo_v1_echo_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_internal_launcher_echo_v1_echo_proto_goTypes = []any{
 	(*EchoRequest)(nil),  // 0: moby.extensions.internal.launcher.echo.v1.EchoRequest
 	(*EchoResponse)(nil), // 1: moby.extensions.internal.launcher.echo.v1.EchoResponse
 }
-var file_internal_extensions_internal_launcher_echo_v1_echo_proto_depIdxs = []int32{
+var file_internal_launcher_echo_v1_echo_proto_depIdxs = []int32{
 	0, // 0: moby.extensions.internal.launcher.echo.v1.Echo.Echo:input_type -> moby.extensions.internal.launcher.echo.v1.EchoRequest
 	1, // 1: moby.extensions.internal.launcher.echo.v1.Echo.Echo:output_type -> moby.extensions.internal.launcher.echo.v1.EchoResponse
 	1, // [1:2] is the sub-list for method output_type
@@ -149,26 +148,26 @@ var file_internal_extensions_internal_launcher_echo_v1_echo_proto_depIdxs = []in
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_internal_extensions_internal_launcher_echo_v1_echo_proto_init() }
-func file_internal_extensions_internal_launcher_echo_v1_echo_proto_init() {
-	if File_internal_extensions_internal_launcher_echo_v1_echo_proto != nil {
+func init() { file_internal_launcher_echo_v1_echo_proto_init() }
+func file_internal_launcher_echo_v1_echo_proto_init() {
+	if File_internal_launcher_echo_v1_echo_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeFor[x]().PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_extensions_internal_launcher_echo_v1_echo_proto_rawDesc), len(file_internal_extensions_internal_launcher_echo_v1_echo_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_launcher_echo_v1_echo_proto_rawDesc), len(file_internal_launcher_echo_v1_echo_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_internal_extensions_internal_launcher_echo_v1_echo_proto_goTypes,
-		DependencyIndexes: file_internal_extensions_internal_launcher_echo_v1_echo_proto_depIdxs,
-		MessageInfos:      file_internal_extensions_internal_launcher_echo_v1_echo_proto_msgTypes,
+		GoTypes:           file_internal_launcher_echo_v1_echo_proto_goTypes,
+		DependencyIndexes: file_internal_launcher_echo_v1_echo_proto_depIdxs,
+		MessageInfos:      file_internal_launcher_echo_v1_echo_proto_msgTypes,
 	}.Build()
-	File_internal_extensions_internal_launcher_echo_v1_echo_proto = out.File
-	file_internal_extensions_internal_launcher_echo_v1_echo_proto_goTypes = nil
-	file_internal_extensions_internal_launcher_echo_v1_echo_proto_depIdxs = nil
+	File_internal_launcher_echo_v1_echo_proto = out.File
+	file_internal_launcher_echo_v1_echo_proto_goTypes = nil
+	file_internal_launcher_echo_v1_echo_proto_depIdxs = nil
 }

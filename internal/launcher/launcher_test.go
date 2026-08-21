@@ -124,10 +124,12 @@ func TestLaunchOutOfProcess(t *testing.T) {
 	defer func() { assert.NilError(t, launched.Close(context.Background())) }()
 
 	assert.Equal(t, launched.ID, extensions.ExtensionID(id))
-	assert.Check(t, is.Len(launched.Points, 1))
+	assert.Check(t, is.Len(launched.Points, 2))
 	assert.Equal(t, launched.Points[0].ID, echov1.Point.ID())
+	assert.DeepEqual(t, launched.OfferedPoints, []extensions.PointID{echov1.Point.ID()})
+	assert.DeepEqual(t, launched.ProviderServices[echov1.Point.ID()], []string{"moby.extensions.internal.launcher.echo.v1.Echo"})
 
-	client := echopb.ClientProvider(launched.Conn).Impl.(echov1.EchoServer)
+	client := echopb.ClientProvider(launched.Conn).Impl.(echov1.Echo)
 
 	resp, err := client.Echo(ctx, &echov1.EchoRequest{Message: "ping"})
 	assert.NilError(t, err, "non-empty message should be echoed")
@@ -171,7 +173,7 @@ func TestStopProcessAfterSelfExit(t *testing.T) {
 
 func TestServicesRequireDeclaringThePoint(t *testing.T) {
 	const declared = extensions.PointID("org.mobyproject.extension.declared.v1")
-	const undeclared = extensions.PointID("org.mobyproject.extension.service.grpc.v0")
+	const undeclared = extensions.PointID("org.example.undeclared.v1")
 
 	l := &Launched{
 		ID:     "org.example.ext.v1",

@@ -33,28 +33,59 @@ func TestParseConvertsDeclaration(t *testing.T) {
 	decl, err := Parse("example", &sdkapi.Declaration{
 		ID: "example",
 		Providers: []sdkapi.PointDeclaration{
-			{ID: "point.one"},
-			{ID: "point.two"},
+			{ID: "org.example.one.v1"},
+			{ID: "org.example.two.v1"},
 		},
 		Dependencies: []sdkapi.Dependency{
-			{Point: "point.one", Extension: "provider", Optional: true},
+			{Point: "org.example.one.v1", Extension: "provider", Optional: true},
 		},
 		Conflicts: []string{"conflict"},
 		ProviderServices: []sdkapi.ProviderServices{
-			{Point: "point.one", Services: []string{"service.One"}},
-			{Point: "point.one", Services: []string{"service.Two"}},
+			{Point: "org.example.one.v1", Services: []string{"service.One"}},
+			{Point: "org.example.one.v1", Services: []string{"service.Two"}},
 		},
+		OfferedPoints: []string{"org.example.one.v1"},
 	})
 	assert.NilError(t, err)
 	assert.Assert(t, is.DeepEqual(decl, &Declaration{
-		ID:           extensions.ExtensionID("example"),
-		Points:       []extensions.PointID{"point.one", "point.two"},
-		Dependencies: []extensions.Dependency{{Point: "point.one", Extension: "provider", Optional: true}},
-		Conflicts:    []extensions.ExtensionID{"conflict"},
+		ID:            extensions.ExtensionID("example"),
+		Points:        []extensions.PointID{"org.example.one.v1", "org.example.two.v1"},
+		OfferedPoints: []extensions.PointID{"org.example.one.v1"},
+		Dependencies:  []extensions.Dependency{{Point: "org.example.one.v1", Extension: "provider", Optional: true}},
+		Conflicts:     []extensions.ExtensionID{"conflict"},
 		ProviderServices: map[extensions.PointID][]string{
-			"point.one": {"service.One", "service.Two"},
+			"org.example.one.v1": {"service.One", "service.Two"},
 		},
 	}))
+}
+
+func TestParseRejectsInvalidOffers(t *testing.T) {
+	const point = "org.example.api.v1"
+	const metadata = "org.mobyproject.extension.service.v0"
+	tests := []struct {
+		name      string
+		providers []sdkapi.PointDeclaration
+		offers    []string
+		services  []sdkapi.ProviderServices
+		want      string
+	}{
+		{name: "invalid", offers: []string{"not-versioned"}, want: "offered an invalid point"},
+		{name: "duplicate", providers: []sdkapi.PointDeclaration{{ID: point}}, offers: []string{point, point}, services: []sdkapi.ProviderServices{{Point: point, Services: []string{"example.API"}}}, want: "more than once"},
+		{name: "unimplemented", offers: []string{point}, want: "without implementing it"},
+		{name: "metadata point", providers: []sdkapi.PointDeclaration{{ID: metadata}}, offers: []string{metadata}, services: []sdkapi.ProviderServices{{Point: metadata, Services: []string{"example.Metadata"}}}, want: "cannot offer publication metadata"},
+		{name: "missing service", providers: []sdkapi.PointDeclaration{{ID: point}}, offers: []string{point}, want: "without reporting a service"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse("example", &sdkapi.Declaration{
+				ID:               "example",
+				Providers:        tc.providers,
+				OfferedPoints:    tc.offers,
+				ProviderServices: tc.services,
+			})
+			assert.ErrorContains(t, err, tc.want)
+		})
+	}
 }
 
 func TestParseRejectsServicesForUndeclaredPoint(t *testing.T) {

@@ -6,8 +6,8 @@ type point struct {
 	pkgName    string // Go package name
 	importPath string // package import path
 	protoPath  string // module-relative path of the .proto
-	id         string // proto package: the point id, or the pragma's package in service mode
-	service    string // gRPC service name (from the mobyextgen:service pragma)
+	id         string // proto package: the point id, or the explicit package in service mode
+	service    string // gRPC service name: the contract interface name
 	iface      string // Go service interface name
 	isPoint    bool   // whether the contract declares an extensions.Point
 	isSingle   bool   // whether the point was declared with DefineSinglePoint

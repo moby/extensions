@@ -1,7 +1,9 @@
-// Command mobyextgen generates an extension point's wire contract and transport
-// code from a Go interface and pb-tagged message structs.
+// Command mobyextgen generates an extension point or service's wire contract
+// and transport code from a Go interface and pb-tagged message structs.
 //
-// Run with no arguments from the point's package, typically through `go generate`.
+// Run with no arguments from a Point contract's package, typically through
+// `go generate`. Use -service with a fully qualified gRPC service name for an
+// internal transport contract that is not a Point.
 //
 //   - <service>.proto:       the reviewable wire contract.
 //   - protogen/<service>.pb.go: the protobuf message code.
@@ -15,6 +17,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path"
@@ -23,21 +26,34 @@ import (
 )
 
 func main() {
+	service := flag.String("service", "", "fully qualified name of a non-Point gRPC service")
+	flag.Usage = func() {
+		fmt.Fprintln(flag.CommandLine.Output(), "usage: mobyextgen [-service package.Service] [dir]")
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
 	dir := "."
-	if args := os.Args[1:]; len(args) == 1 {
+	if args := flag.Args(); len(args) == 1 {
 		dir = args[0]
 	} else if len(args) > 1 {
-		fmt.Fprintln(os.Stderr, "usage: mobyextgen [dir]")
+		flag.Usage()
 		os.Exit(2)
 	}
-	if err := run(dir); err != nil {
+	if err := run(dir, *service); err != nil {
 		fmt.Fprintln(os.Stderr, "mobyextgen:", err)
 		os.Exit(1)
 	}
 }
 
-func run(dir string) error {
-	pt, err := parsePoint(dir)
+func run(dir, service string) error {
+	var pt point
+	var err error
+	if service == "" {
+		pt, err = parsePoint(dir)
+	} else {
+		pt, err = parseService(dir, service)
+	}
 	if err != nil {
 		return err
 	}

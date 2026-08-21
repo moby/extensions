@@ -2,17 +2,16 @@
 // versions:
 // 	protoc-gen-go v1.36.11-devel
 // 	protoc        (unknown)
-// source: internal/extensions/sdk/sdkapi/extension.proto
+// source: sdk/sdkapi/extension.proto
 
 package protogen
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -28,7 +27,7 @@ type Declaration struct {
 	Providers        []*PointDeclaration    `protobuf:"bytes,2,rep,name=providers,proto3" json:"providers,omitempty"`
 	Dependencies     []*Dependency          `protobuf:"bytes,3,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
 	Conflicts        []string               `protobuf:"bytes,4,rep,name=conflicts,proto3" json:"conflicts,omitempty"`
-	ExposedServices  []string               `protobuf:"bytes,5,rep,name=exposed_services,json=exposedServices,proto3" json:"exposed_services,omitempty"`
+	OfferedPoints    []string               `protobuf:"bytes,5,rep,name=offered_points,json=offeredPoints,proto3" json:"offered_points,omitempty"`
 	ProviderServices []*ProviderServices    `protobuf:"bytes,6,rep,name=provider_services,json=providerServices,proto3" json:"provider_services,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
@@ -36,7 +35,7 @@ type Declaration struct {
 
 func (x *Declaration) Reset() {
 	*x = Declaration{}
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[0]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -48,7 +47,7 @@ func (x *Declaration) String() string {
 func (*Declaration) ProtoMessage() {}
 
 func (x *Declaration) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[0]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -61,7 +60,7 @@ func (x *Declaration) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Declaration.ProtoReflect.Descriptor instead.
 func (*Declaration) Descriptor() ([]byte, []int) {
-	return file_internal_extensions_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{0}
+	return file_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Declaration) GetId() string {
@@ -92,9 +91,9 @@ func (x *Declaration) GetConflicts() []string {
 	return nil
 }
 
-func (x *Declaration) GetExposedServices() []string {
+func (x *Declaration) GetOfferedPoints() []string {
 	if x != nil {
-		return x.ExposedServices
+		return x.OfferedPoints
 	}
 	return nil
 }
@@ -117,7 +116,7 @@ type Dependency struct {
 
 func (x *Dependency) Reset() {
 	*x = Dependency{}
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[1]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -129,7 +128,7 @@ func (x *Dependency) String() string {
 func (*Dependency) ProtoMessage() {}
 
 func (x *Dependency) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[1]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -142,7 +141,7 @@ func (x *Dependency) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Dependency.ProtoReflect.Descriptor instead.
 func (*Dependency) Descriptor() ([]byte, []int) {
-	return file_internal_extensions_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{1}
+	return file_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Dependency) GetPoint() string {
@@ -174,7 +173,7 @@ type DescribeRequest struct {
 
 func (x *DescribeRequest) Reset() {
 	*x = DescribeRequest{}
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[2]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -186,7 +185,7 @@ func (x *DescribeRequest) String() string {
 func (*DescribeRequest) ProtoMessage() {}
 
 func (x *DescribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[2]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -199,7 +198,7 @@ func (x *DescribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DescribeRequest.ProtoReflect.Descriptor instead.
 func (*DescribeRequest) Descriptor() ([]byte, []int) {
-	return file_internal_extensions_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{2}
+	return file_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{2}
 }
 
 type DescribeResponse struct {
@@ -211,7 +210,7 @@ type DescribeResponse struct {
 
 func (x *DescribeResponse) Reset() {
 	*x = DescribeResponse{}
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[3]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -223,7 +222,7 @@ func (x *DescribeResponse) String() string {
 func (*DescribeResponse) ProtoMessage() {}
 
 func (x *DescribeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[3]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -236,7 +235,7 @@ func (x *DescribeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DescribeResponse.ProtoReflect.Descriptor instead.
 func (*DescribeResponse) Descriptor() ([]byte, []int) {
-	return file_internal_extensions_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{3}
+	return file_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *DescribeResponse) GetDeclaration() *Declaration {
@@ -254,7 +253,7 @@ type InitializeRequest struct {
 
 func (x *InitializeRequest) Reset() {
 	*x = InitializeRequest{}
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[4]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -266,7 +265,7 @@ func (x *InitializeRequest) String() string {
 func (*InitializeRequest) ProtoMessage() {}
 
 func (x *InitializeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[4]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -279,7 +278,7 @@ func (x *InitializeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InitializeRequest.ProtoReflect.Descriptor instead.
 func (*InitializeRequest) Descriptor() ([]byte, []int) {
-	return file_internal_extensions_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{4}
+	return file_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{4}
 }
 
 type InitializeResponse struct {
@@ -290,7 +289,7 @@ type InitializeResponse struct {
 
 func (x *InitializeResponse) Reset() {
 	*x = InitializeResponse{}
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[5]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -302,7 +301,7 @@ func (x *InitializeResponse) String() string {
 func (*InitializeResponse) ProtoMessage() {}
 
 func (x *InitializeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[5]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -315,7 +314,7 @@ func (x *InitializeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InitializeResponse.ProtoReflect.Descriptor instead.
 func (*InitializeResponse) Descriptor() ([]byte, []int) {
-	return file_internal_extensions_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{5}
+	return file_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{5}
 }
 
 type PointDeclaration struct {
@@ -327,7 +326,7 @@ type PointDeclaration struct {
 
 func (x *PointDeclaration) Reset() {
 	*x = PointDeclaration{}
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[6]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -339,7 +338,7 @@ func (x *PointDeclaration) String() string {
 func (*PointDeclaration) ProtoMessage() {}
 
 func (x *PointDeclaration) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[6]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -352,7 +351,7 @@ func (x *PointDeclaration) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PointDeclaration.ProtoReflect.Descriptor instead.
 func (*PointDeclaration) Descriptor() ([]byte, []int) {
-	return file_internal_extensions_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{6}
+	return file_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *PointDeclaration) GetId() string {
@@ -372,7 +371,7 @@ type ProviderServices struct {
 
 func (x *ProviderServices) Reset() {
 	*x = ProviderServices{}
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[7]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -384,7 +383,7 @@ func (x *ProviderServices) String() string {
 func (*ProviderServices) ProtoMessage() {}
 
 func (x *ProviderServices) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes[7]
+	mi := &file_sdk_sdkapi_extension_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -397,7 +396,7 @@ func (x *ProviderServices) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProviderServices.ProtoReflect.Descriptor instead.
 func (*ProviderServices) Descriptor() ([]byte, []int) {
-	return file_internal_extensions_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{7}
+	return file_sdk_sdkapi_extension_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ProviderServices) GetPoint() string {
@@ -414,17 +413,17 @@ func (x *ProviderServices) GetServices() []string {
 	return nil
 }
 
-var File_internal_extensions_sdk_sdkapi_extension_proto protoreflect.FileDescriptor
+var File_sdk_sdkapi_extension_proto protoreflect.FileDescriptor
 
-const file_internal_extensions_sdk_sdkapi_extension_proto_rawDesc = "" +
+const file_sdk_sdkapi_extension_proto_rawDesc = "" +
 	"\n" +
-	".internal/extensions/sdk/sdkapi/extension.proto\x12\x19moby.extension.runtime.v1\"\xd6\x02\n" +
+	"\x1asdk/sdkapi/extension.proto\x12\x19moby.extension.runtime.v1\"\xd2\x02\n" +
 	"\vDeclaration\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12I\n" +
 	"\tproviders\x18\x02 \x03(\v2+.moby.extension.runtime.v1.PointDeclarationR\tproviders\x12I\n" +
 	"\fdependencies\x18\x03 \x03(\v2%.moby.extension.runtime.v1.DependencyR\fdependencies\x12\x1c\n" +
-	"\tconflicts\x18\x04 \x03(\tR\tconflicts\x12)\n" +
-	"\x10exposed_services\x18\x05 \x03(\tR\x0fexposedServices\x12X\n" +
+	"\tconflicts\x18\x04 \x03(\tR\tconflicts\x12%\n" +
+	"\x0eoffered_points\x18\x05 \x03(\tR\rofferedPoints\x12X\n" +
 	"\x11provider_services\x18\x06 \x03(\v2+.moby.extension.runtime.v1.ProviderServicesR\x10providerServices\"\\\n" +
 	"\n" +
 	"Dependency\x12\x14\n" +
@@ -435,9 +434,9 @@ const file_internal_extensions_sdk_sdkapi_extension_proto_rawDesc = "" +
 	"\x10DescribeResponse\x12H\n" +
 	"\vdeclaration\x18\x01 \x01(\v2&.moby.extension.runtime.v1.DeclarationR\vdeclaration\"\x13\n" +
 	"\x11InitializeRequest\"\x14\n" +
-	"\x12InitializeResponse\"(\n" +
+	"\x12InitializeResponse\"\"\n" +
 	"\x10PointDeclaration\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02idJ\x04\b\x02\x10\x03\"D\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"D\n" +
 	"\x10ProviderServices\x12\x14\n" +
 	"\x05point\x18\x01 \x01(\tR\x05point\x12\x1a\n" +
 	"\bservices\x18\x02 \x03(\tR\bservices2\xdb\x01\n" +
@@ -447,19 +446,19 @@ const file_internal_extensions_sdk_sdkapi_extension_proto_rawDesc = "" +
 	"Initialize\x12,.moby.extension.runtime.v1.InitializeRequest\x1a-.moby.extension.runtime.v1.InitializeResponseB0Z.github.com/moby/extensions/sdk/sdkapi/protogenb\x06proto3"
 
 var (
-	file_internal_extensions_sdk_sdkapi_extension_proto_rawDescOnce sync.Once
-	file_internal_extensions_sdk_sdkapi_extension_proto_rawDescData []byte
+	file_sdk_sdkapi_extension_proto_rawDescOnce sync.Once
+	file_sdk_sdkapi_extension_proto_rawDescData []byte
 )
 
-func file_internal_extensions_sdk_sdkapi_extension_proto_rawDescGZIP() []byte {
-	file_internal_extensions_sdk_sdkapi_extension_proto_rawDescOnce.Do(func() {
-		file_internal_extensions_sdk_sdkapi_extension_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_extensions_sdk_sdkapi_extension_proto_rawDesc), len(file_internal_extensions_sdk_sdkapi_extension_proto_rawDesc)))
+func file_sdk_sdkapi_extension_proto_rawDescGZIP() []byte {
+	file_sdk_sdkapi_extension_proto_rawDescOnce.Do(func() {
+		file_sdk_sdkapi_extension_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_sdk_sdkapi_extension_proto_rawDesc), len(file_sdk_sdkapi_extension_proto_rawDesc)))
 	})
-	return file_internal_extensions_sdk_sdkapi_extension_proto_rawDescData
+	return file_sdk_sdkapi_extension_proto_rawDescData
 }
 
-var file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
-var file_internal_extensions_sdk_sdkapi_extension_proto_goTypes = []any{
+var file_sdk_sdkapi_extension_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_sdk_sdkapi_extension_proto_goTypes = []any{
 	(*Declaration)(nil),        // 0: moby.extension.runtime.v1.Declaration
 	(*Dependency)(nil),         // 1: moby.extension.runtime.v1.Dependency
 	(*DescribeRequest)(nil),    // 2: moby.extension.runtime.v1.DescribeRequest
@@ -469,7 +468,7 @@ var file_internal_extensions_sdk_sdkapi_extension_proto_goTypes = []any{
 	(*PointDeclaration)(nil),   // 6: moby.extension.runtime.v1.PointDeclaration
 	(*ProviderServices)(nil),   // 7: moby.extension.runtime.v1.ProviderServices
 }
-var file_internal_extensions_sdk_sdkapi_extension_proto_depIdxs = []int32{
+var file_sdk_sdkapi_extension_proto_depIdxs = []int32{
 	6, // 0: moby.extension.runtime.v1.Declaration.providers:type_name -> moby.extension.runtime.v1.PointDeclaration
 	1, // 1: moby.extension.runtime.v1.Declaration.dependencies:type_name -> moby.extension.runtime.v1.Dependency
 	7, // 2: moby.extension.runtime.v1.Declaration.provider_services:type_name -> moby.extension.runtime.v1.ProviderServices
@@ -485,26 +484,26 @@ var file_internal_extensions_sdk_sdkapi_extension_proto_depIdxs = []int32{
 	0, // [0:4] is the sub-list for field type_name
 }
 
-func init() { file_internal_extensions_sdk_sdkapi_extension_proto_init() }
-func file_internal_extensions_sdk_sdkapi_extension_proto_init() {
-	if File_internal_extensions_sdk_sdkapi_extension_proto != nil {
+func init() { file_sdk_sdkapi_extension_proto_init() }
+func file_sdk_sdkapi_extension_proto_init() {
+	if File_sdk_sdkapi_extension_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeFor[x]().PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_extensions_sdk_sdkapi_extension_proto_rawDesc), len(file_internal_extensions_sdk_sdkapi_extension_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sdk_sdkapi_extension_proto_rawDesc), len(file_sdk_sdkapi_extension_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_internal_extensions_sdk_sdkapi_extension_proto_goTypes,
-		DependencyIndexes: file_internal_extensions_sdk_sdkapi_extension_proto_depIdxs,
-		MessageInfos:      file_internal_extensions_sdk_sdkapi_extension_proto_msgTypes,
+		GoTypes:           file_sdk_sdkapi_extension_proto_goTypes,
+		DependencyIndexes: file_sdk_sdkapi_extension_proto_depIdxs,
+		MessageInfos:      file_sdk_sdkapi_extension_proto_msgTypes,
 	}.Build()
-	File_internal_extensions_sdk_sdkapi_extension_proto = out.File
-	file_internal_extensions_sdk_sdkapi_extension_proto_goTypes = nil
-	file_internal_extensions_sdk_sdkapi_extension_proto_depIdxs = nil
+	File_sdk_sdkapi_extension_proto = out.File
+	file_sdk_sdkapi_extension_proto_goTypes = nil
+	file_sdk_sdkapi_extension_proto_depIdxs = nil
 }

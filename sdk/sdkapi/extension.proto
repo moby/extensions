@@ -16,7 +16,7 @@ message Declaration {
   repeated PointDeclaration providers = 2;
   repeated Dependency dependencies = 3;
   repeated string conflicts = 4;
-  repeated string exposed_services = 5;
+  repeated string offered_points = 5;
   repeated ProviderServices provider_services = 6;
 }
 
@@ -41,7 +41,6 @@ message InitializeResponse {
 
 message PointDeclaration {
   string id = 1;
-  reserved 2;
 }
 
 message ProviderServices {

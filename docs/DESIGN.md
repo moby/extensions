@@ -173,6 +173,8 @@ Startup proceeds as follows:
    The SDK runs the extension's `Init` then and its `Shutdown` during shutdown.
    A dependency callback socket is available at initialization when the host offered the declared dependency points.
    The SDK connects lazily, and `Depends` supplies generated client adapters.
+   A client resolved from that callback may be retained for normal operation,
+   but the SDK closes the callback connection before invoking `Shutdown`.
 
 Point calls use generated gRPC server and client wiring.
 The generated client adapter presents the same Go interface to the host.

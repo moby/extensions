@@ -305,6 +305,75 @@ func (b *Bridge) Declaration() extensions.Declaration {
 Config is keyed by id in `daemon.json`; declare dependencies and conflicts in the declaration.
 The broker initializes dependencies before dependents.
 
+### Retain dependencies for later calls
+
+`Init` is where the host supplies the resolver.
+If an extension needs a dependency after initialization, resolve it in `Init` and
+store the typed interface on the same stateful extension object:
+
+```go
+type Consumer struct {
+	greeter greeterv0.Greeter
+}
+
+func (c *Consumer) init(
+	_ context.Context,
+	_ extensions.Config,
+	resolver extensions.Resolver,
+) error {
+	greeter, err := greeterv0.Point.Single(resolver)
+	if err != nil {
+		return err
+	}
+	c.greeter = greeter
+	return nil
+}
+
+func (c *Consumer) Handle(
+	ctx context.Context,
+	req *greeterv0.HelloRequest,
+) (*greeterv0.HelloReply, error) {
+	return c.greeter.Greet(ctx, req)
+}
+```
+
+The dependency declaration controls presence and initialization order; it does
+not inject a field automatically.
+Resolve during `Init` so a missing or ambiguous required dependency fails before
+the extension starts serving.
+Store the resolver itself only when lookup must be deferred.
+
+For a fan-out point, store the typed provider list returned by `All`:
+
+```go
+type Consumer struct {
+	greeters []extensions.TypedProvider[greeterv0.Greeter]
+}
+
+func (c *Consumer) init(
+	_ context.Context,
+	_ extensions.Config,
+	resolver extensions.Resolver,
+) error {
+	var err error
+	c.greeters, err = greeterv0.Point.All(resolver)
+	return err
+}
+```
+
+Use `ByExtension` when the extension must call one named provider.
+For an optional dependency, declare `Point.OptionalDependency()`, check
+`Point.Enabled(resolver)` in `Init`, and leave the stored provider empty when the
+point is absent.
+
+The same pattern works out of process: the resolved interface may be a generated
+gRPC client and can be stored for normal operation.
+The binary must still call `Server.Depends` for the point, and the host must
+offer its generated `ServerPoint` as described below.
+The current SDK closes the dependency callback connection before it calls the
+extension's `Shutdown` hook, so a retained out-of-process dependency must not be
+used from `Shutdown`.
+
 For an out-of-process extension, wire every dependency point it will call:
 
 ```go

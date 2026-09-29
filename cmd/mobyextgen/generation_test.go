@@ -131,8 +131,8 @@ type Runtime interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
 	wire, err := emitWire(pt)
 	assert.NilError(t, err)
 	src := string(wire)
-	assert.Check(t, strings.Contains(src, "func RegisterServer(r grpc.ServiceRegistrar, impl p.Runtime)"), src)
-	assert.Check(t, strings.Contains(src, "func NewClient(conn grpc.ClientConnInterface) p.Runtime"), src)
+	assert.Check(t, strings.Contains(src, "func RegisterServer(r grpc.ServiceRegistrar, impl mobyextcontract.Runtime)"), src)
+	assert.Check(t, strings.Contains(src, "func NewClient(conn grpc.ClientConnInterface) mobyextcontract.Runtime"), src)
 	assert.Check(t, !strings.Contains(src, "ServerPoint"), "a non-point contract must not emit point registrations:\n%s", src)
 	assert.Check(t, !strings.Contains(src, "clientpoint"), "a non-point contract must not import the point packages:\n%s", src)
 	assert.Check(t, !strings.Contains(src, "servicev0"), "an unpublished contract must not emit typed publication APIs:\n%s", src)
@@ -163,7 +163,7 @@ var Point = extensions.DefinePoint[Runtime]("my.proto.pkg.v1")
 	assert.Check(t, strings.Contains(src, "var ClientPoint = clientpoint.Registration{"), src)
 	assert.Check(t, strings.Contains(src, "func NewRuntimeClient(cc grpc.ClientConnInterface) RuntimeClient"),
 		"ordinary point must retain its raw gRPC client:\n%s", src)
-	assert.Check(t, strings.Contains(src, "func NewClient(conn grpc.ClientConnInterface) p.Runtime"),
+	assert.Check(t, strings.Contains(src, "func NewClient(conn grpc.ClientConnInterface) mobyextcontract.Runtime"),
 		"ordinary point must expose its handwritten client:\n%s", src)
 	assert.Check(t, !strings.Contains(src, "servicev0") && !strings.Contains(src, "func Bind("),
 		"ordinary Point transport must not contain extension-side publication bindings:\n%s", src)

@@ -8,7 +8,7 @@ import (
 	context "context"
 	extensions "github.com/moby/extensions"
 	clientpoint "github.com/moby/extensions/clientpoint"
-	echov1 "github.com/moby/extensions/internal/launcher/echo/v1"
+	mobyextcontract "github.com/moby/extensions/internal/launcher/echo/v1"
 	serverpoint "github.com/moby/extensions/serverpoint"
 	grpc "google.golang.org/grpc"
 )
@@ -76,29 +76,29 @@ func (c *serviceClient) Echo(ctx context.Context, in *EchoRequest, opts ...grpc.
 // ServerPoint serves the Echo point: it registers the point's gRPC service for
 // a provider with an SDK server. A binary passes it to (*sdk.Server).Register.
 var ServerPoint = serverpoint.Registration{
-	Point: echov1.Point.ID(),
+	Point: mobyextcontract.Point.ID(),
 	Register: func(r grpc.ServiceRegistrar, impl any) {
-		r.RegisterService(&serviceDesc, &grpcServer{impl: impl.(echov1.Echo)})
+		r.RegisterService(&serviceDesc, &grpcServer{impl: impl.(mobyextcontract.Echo)})
 	},
 }
 
 // ClientProvider builds a broker provider for the Echo point from an
 // out-of-process gRPC connection.
 func ClientProvider(conn grpc.ClientConnInterface) extensions.Provider {
-	return echov1.Point.Provide(NewClient(conn))
+	return mobyextcontract.Point.Provide(NewClient(conn))
 }
 
 // ClientPoint registers ClientProvider for the Echo point with a host.
-var ClientPoint = clientpoint.Registration{Point: echov1.Point.ID(), Provider: ClientProvider}
+var ClientPoint = clientpoint.Registration{Point: mobyextcontract.Point.ID(), Provider: ClientProvider}
 
-// NewClient returns a echov1.Echo that calls the Echo point over conn.
-func NewClient(conn grpc.ClientConnInterface) echov1.Echo {
+// NewClient returns a mobyextcontract.Echo that calls the Echo point over conn.
+func NewClient(conn grpc.ClientConnInterface) mobyextcontract.Echo {
 	return &grpcClient{client: NewEchoClient(conn)}
 }
 
 // grpcServer serves an implementation of the contract's Go interface.
 type grpcServer struct {
-	impl echov1.Echo
+	impl mobyextcontract.Echo
 }
 
 func (s *grpcServer) Echo(ctx context.Context, req *EchoRequest) (*EchoResponse, error) {
@@ -113,7 +113,7 @@ type grpcClient struct {
 	client EchoClient
 }
 
-func (c *grpcClient) Echo(ctx context.Context, req *echov1.EchoRequest) (*echov1.EchoResponse, error) {
+func (c *grpcClient) Echo(ctx context.Context, req *mobyextcontract.EchoRequest) (*mobyextcontract.EchoResponse, error) {
 	resp, err := c.client.Echo(ctx, echoRequestToProto(req))
 	if err != nil {
 		return nil, err
@@ -121,7 +121,7 @@ func (c *grpcClient) Echo(ctx context.Context, req *echov1.EchoRequest) (*echov1
 	return echoResponseFromProto(resp), nil
 }
 
-func echoRequestToProto(in *echov1.EchoRequest) *EchoRequest {
+func echoRequestToProto(in *mobyextcontract.EchoRequest) *EchoRequest {
 	if in == nil {
 		return nil
 	}
@@ -130,16 +130,16 @@ func echoRequestToProto(in *echov1.EchoRequest) *EchoRequest {
 	return out
 }
 
-func echoRequestFromProto(in *EchoRequest) *echov1.EchoRequest {
+func echoRequestFromProto(in *EchoRequest) *mobyextcontract.EchoRequest {
 	if in == nil {
 		return nil
 	}
-	out := &echov1.EchoRequest{}
+	out := &mobyextcontract.EchoRequest{}
 	out.Message = in.GetMessage()
 	return out
 }
 
-func echoResponseToProto(in *echov1.EchoResponse) *EchoResponse {
+func echoResponseToProto(in *mobyextcontract.EchoResponse) *EchoResponse {
 	if in == nil {
 		return nil
 	}
@@ -148,11 +148,11 @@ func echoResponseToProto(in *echov1.EchoResponse) *EchoResponse {
 	return out
 }
 
-func echoResponseFromProto(in *EchoResponse) *echov1.EchoResponse {
+func echoResponseFromProto(in *EchoResponse) *mobyextcontract.EchoResponse {
 	if in == nil {
 		return nil
 	}
-	out := &echov1.EchoResponse{}
+	out := &mobyextcontract.EchoResponse{}
 	out.Message = in.GetMessage()
 	return out
 }

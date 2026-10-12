@@ -37,6 +37,7 @@ These names are distinct:
   Registration rejects invalid ids.
   Its version is a namespace element, not a semantic version, and is independent of point versions.
   Thus `com.foo.v1` and `com.foo.v2` are different extensions, binaries, and configurations that can coexist.
+  The name before the version must not end in a version itself, so `com.foo.v1.v2` is invalid.
 - **Extension identity** is the logical extension id plus the host-attested origin `builtin` or `executable`.
   Registration rejects an empty or unknown origin, an invalid identity id, or an identity id that differs from the declaration id.
   Providers and Host policy receive this validated identity.

@@ -77,6 +77,7 @@ func parseContract(dir, serviceIdentity string) (point, error) {
 	if ifaceType == nil {
 		return point{}, fmt.Errorf("interface %q not found", pt.iface)
 	}
+	pt.doc = interfaceComment(files, pt.iface)
 	// Inherit the contract's copyright and license rather than imposing the
 	// generator's notices on output produced for other projects.
 	for _, f := range files {
@@ -220,6 +221,33 @@ func structHasPBTag(st *ast.StructType) bool {
 	return false
 }
 
+func interfaceComment(files []*ast.File, name string) string {
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			group, ok := decl.(*ast.GenDecl)
+			if !ok || group.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range group.Specs {
+				typeSpec := spec.(*ast.TypeSpec)
+				if typeSpec.Name.Name != name {
+					continue
+				}
+				doc := typeSpec.Doc
+				// Like go/doc, a group comment documents only a single-type group.
+				if doc == nil && len(group.Specs) == 1 {
+					doc = group.Doc
+				}
+				if doc != nil {
+					return strings.TrimSpace(doc.Text())
+				}
+				return ""
+			}
+		}
+	}
+	return ""
+}
+
 func parseMethods(iface *ast.InterfaceType) ([]method, error) {
 	var methods []method
 	for _, m := range iface.Methods.List {
@@ -228,6 +256,7 @@ func parseMethods(iface *ast.InterfaceType) ([]method, error) {
 			continue
 		}
 		name := m.Names[0].Name
+		doc := fieldComment(m)
 		if ft.Params == nil || len(ft.Params.List) == 0 {
 			return nil, fmt.Errorf("method %q: expected a request parameter", name)
 		}
@@ -239,18 +268,29 @@ func parseMethods(iface *ast.InterfaceType) ([]method, error) {
 		res := results(ft)
 		switch {
 		case len(res) == 1 && isIdent(res[0], "error"):
-			methods = append(methods, method{name: name, request: req, response: name + "Response", bareError: true})
+			methods = append(methods, method{name: name, request: req, response: name + "Response", bareError: true, doc: doc})
 		case len(res) == 2 && isIdent(res[1], "error"):
 			resp, err := pointerIdent(res[0])
 			if err != nil {
 				return nil, fmt.Errorf("method %q response: %w", name, err)
 			}
-			methods = append(methods, method{name: name, request: req, response: resp})
+			methods = append(methods, method{name: name, request: req, response: resp, doc: doc})
 		default:
 			return nil, fmt.Errorf("method %q: result must be `error` or `(*Resp, error)`", name)
 		}
 	}
 	return methods, nil
+}
+
+func fieldComment(field *ast.Field) string {
+	group := field.Doc
+	if group == nil {
+		group = field.Comment
+	}
+	if group == nil {
+		return ""
+	}
+	return strings.TrimSpace(group.Text())
 }
 
 func parseMessages(files []*ast.File, msgNames map[string]bool) ([]message, error) {

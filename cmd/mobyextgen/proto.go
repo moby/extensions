@@ -21,8 +21,10 @@ func emitProto(pt point) ([]byte, error) {
 	fmt.Fprintf(&b, "package %s;\n\n", pt.id)
 	fmt.Fprintf(&b, "option go_package = %q;\n\n", pt.protogenImport())
 
+	emitComment(&b, "", pt.doc)
 	fmt.Fprintf(&b, "service %s {\n", pt.service)
 	for _, m := range pt.methods {
+		emitComment(&b, "  ", m.doc)
 		fmt.Fprintf(&b, "  rpc %s(%s) returns (%s);\n", m.name, m.request, m.response)
 	}
 	fmt.Fprintln(&b, "}")

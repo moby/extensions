@@ -59,6 +59,7 @@ func emitWire(pt point) ([]byte, error) {
 	`, svc)
 	}
 	for _, m := range pt.methods {
+		emitComment(&b, "\t", m.doc)
 		fmt.Fprintf(&b, "\t%s(context.Context, *%s) (*%s, error)\n", m.name, m.request, m.response)
 	}
 	fmt.Fprintln(&b, "}")
@@ -115,6 +116,7 @@ func emitWire(pt point) ([]byte, error) {
 	`, svc)
 	}
 	for _, m := range pt.methods {
+		emitComment(&b, "\t", m.doc)
 		fmt.Fprintf(&b, "\t%s(ctx context.Context, in *%s, opts ...grpc.CallOption) (*%s, error)\n", m.name, m.request, m.response)
 	}
 	fmt.Fprintln(&b, "}")
@@ -240,6 +242,19 @@ func emitWire(pt point) ([]byte, error) {
 	}
 
 	return format.Source([]byte(b.String()))
+}
+
+func emitComment(b *strings.Builder, indent, doc string) {
+	if doc == "" {
+		return
+	}
+	for line := range strings.SplitSeq(doc, "\n") {
+		if line == "" {
+			fmt.Fprintf(b, "%s//\n", indent)
+			continue
+		}
+		fmt.Fprintf(b, "%s// %s\n", indent, line)
+	}
 }
 
 func emitConversions(b *strings.Builder, cpkg string, msg message) {

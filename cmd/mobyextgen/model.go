@@ -14,6 +14,7 @@ type point struct {
 	iface         string // Go service interface name
 	isPoint       bool   // whether the contract declares an extensions.Point
 	isSingle      bool   // whether the point was declared with DefineSinglePoint
+	doc           string // documentation on the provider interface
 	methods       []method
 	messages      []message
 }
@@ -28,6 +29,7 @@ type method struct {
 	request   string // request message name
 	response  string // response message name
 	bareError bool   // true for `M(ctx, *Req) error`; response is a generated empty message
+	doc       string // method documentation
 }
 
 type message struct {

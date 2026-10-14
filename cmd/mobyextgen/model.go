@@ -25,12 +25,20 @@ func (p point) grpcService() string { return p.id + "." + p.service }
 func (p point) protogenImport() string { return p.importPath + "/protogen" }
 
 type method struct {
+	kind      methodKind
 	name      string // method/rpc name
 	request   string // request message name
 	response  string // response message name
-	bareError bool   // true for `M(ctx, *Req) error`; response is a generated empty message
+	bareError bool   // true only for legacy unary `M(ctx, *Req) error`
 	doc       string // method documentation
 }
+
+type methodKind int
+
+const (
+	methodUnary methodKind = iota
+	methodServerStreaming
+)
 
 type message struct {
 	name     string

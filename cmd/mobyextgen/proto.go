@@ -25,7 +25,15 @@ func emitProto(pt point) ([]byte, error) {
 	fmt.Fprintf(&b, "service %s {\n", pt.service)
 	for _, m := range pt.methods {
 		emitComment(&b, "  ", m.doc)
-		fmt.Fprintf(&b, "  rpc %s(%s) returns (%s);\n", m.name, m.request, m.response)
+		request, response := m.request, m.response
+		switch m.kind {
+		case methodUnary:
+		case methodServerStreaming:
+			response = "stream " + response
+		default:
+			return nil, fmt.Errorf("%s: unknown method kind %d", m.name, m.kind)
+		}
+		fmt.Fprintf(&b, "  rpc %s(%s) returns (%s);\n", m.name, request, response)
 	}
 	fmt.Fprintln(&b, "}")
 

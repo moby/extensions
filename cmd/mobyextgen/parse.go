@@ -10,6 +10,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path"
 	"reflect"
 	"sort"
 	"strconv"
@@ -19,6 +20,8 @@ import (
 )
 
 // parsing
+
+const streamImportPath = "github.com/moby/extensions/stream"
 
 func parsePoint(dir string) (point, error) {
 	return parseContract(dir, "")
@@ -99,7 +102,7 @@ func parseContract(dir, serviceIdentity string) (point, error) {
 	if pt.licenseHeader != "" {
 		pt.licenseHeader += "\n"
 	}
-	pt.methods, err = parseMethods(ifaceType)
+	pt.methods, err = parseMethods(files, ifaceType)
 	if err != nil {
 		return point{}, err
 	}
@@ -248,7 +251,7 @@ func interfaceComment(files []*ast.File, name string) string {
 	return ""
 }
 
-func parseMethods(iface *ast.InterfaceType) ([]method, error) {
+func parseMethods(files []*ast.File, iface *ast.InterfaceType) ([]method, error) {
 	var methods []method
 	for _, m := range iface.Methods.List {
 		ft, ok := m.Type.(*ast.FuncType)
@@ -260,12 +263,17 @@ func parseMethods(iface *ast.InterfaceType) ([]method, error) {
 		params := make([]methodParameter, len(paramFields))
 		for i, param := range paramFields {
 			var err error
-			params[i], err = classifyMethodParameter(param.Type, i)
+			params[i], err = classifyMethodParameter(files, param.Type, i)
 			if err != nil {
 				return nil, fmt.Errorf("method %q parameter %d: %w", name, i+1, err)
 			}
 		}
 		res := results(ft)
+		for _, result := range res {
+			if _, isStream, _ := parseStreamParameter(files, result); isStream {
+				return nil, methodShapeError(name)
+			}
+		}
 
 		doc := fieldComment(m)
 		switch {
@@ -290,6 +298,15 @@ func parseMethods(iface *ast.InterfaceType) ([]method, error) {
 				name: name, request: params[1].message, response: response,
 				bareError: bareError, doc: doc,
 			})
+		case len(params) == 3 && params[0].kind == methodContextParameter &&
+			params[1].kind == methodMessageParameter && params[2].kind == methodSenderParameter:
+			if len(res) != 1 || !isIdent(res[0], "error") {
+				return nil, methodShapeError(name)
+			}
+			methods = append(methods, method{
+				kind: methodServerStreaming, name: name,
+				request: params[1].message, response: params[2].message, doc: doc,
+			})
 		default:
 			return nil, methodShapeError(name)
 		}
@@ -302,6 +319,7 @@ type methodParameterKind int
 const (
 	methodContextParameter methodParameterKind = iota + 1
 	methodMessageParameter
+	methodSenderParameter
 )
 
 type methodParameter struct {
@@ -309,15 +327,24 @@ type methodParameter struct {
 	message string
 }
 
-const acceptedMethodShapes = "accepted shapes are M(context.Context, *Request) (*Reply, error) and " +
-	"M(context.Context, *Request) error"
+const acceptedMethodShapes = "accepted shapes are M(context.Context, *Request) (*Reply, error), " +
+	"M(context.Context, *Request) error, and " +
+	"M(context.Context, *Request, stream.Sender[Chunk]) error"
 
 func methodShapeError(name string) error {
 	return fmt.Errorf("method %q: unsupported signature; %s", name, acceptedMethodShapes)
 }
 
-func classifyMethodParameter(expr ast.Expr, index int) (methodParameter, error) {
-	if index == 0 {
+func classifyMethodParameter(files []*ast.File, expr ast.Expr, index int) (methodParameter, error) {
+	param, isStream, err := parseStreamParameter(files, expr)
+	switch {
+	case err != nil:
+		return methodParameter{}, err
+	case isStream && index == 0:
+		return methodParameter{}, errors.New("stream parameters cannot replace context.Context")
+	case isStream:
+		return param, nil
+	case index == 0:
 		return methodParameter{kind: methodContextParameter}, nil
 	}
 	message, err := pointerIdent(expr)
@@ -325,6 +352,134 @@ func classifyMethodParameter(expr ast.Expr, index int) (methodParameter, error) 
 		return methodParameter{}, err
 	}
 	return methodParameter{kind: methodMessageParameter, message: message}, nil
+}
+
+// parseStreamParameter reports whether expr names stream.Sender and, if so,
+// validates its import and message argument.
+func parseStreamParameter(files []*ast.File, expr ast.Expr) (methodParameter, bool, error) {
+	var (
+		selector *ast.SelectorExpr
+		args     []ast.Expr
+	)
+	switch expr := expr.(type) {
+	case *ast.SelectorExpr:
+		selector = expr
+	case *ast.IndexExpr:
+		selector, _ = expr.X.(*ast.SelectorExpr)
+		args = []ast.Expr{expr.Index}
+	case *ast.IndexListExpr:
+		selector, _ = expr.X.(*ast.SelectorExpr)
+		args = expr.Indices
+	default:
+		return methodParameter{}, false, nil
+	}
+	if selector == nil || selector.Sel.Name != "Sender" {
+		return methodParameter{}, false, nil
+	}
+	use := "stream." + selector.Sel.Name
+	file := fileForExpr(files, expr)
+	if file == nil {
+		return methodParameter{}, true, fmt.Errorf("%s must be imported from %q", use, streamImportPath)
+	}
+	if err := resolveStreamImport(file, selector.X, use); err != nil {
+		return methodParameter{}, true, err
+	}
+	if len(args) != 1 {
+		return methodParameter{}, true, fmt.Errorf("%s must have exactly one local message type argument", use)
+	}
+	message, err := streamMessageArgument(args[0])
+	if err != nil {
+		return methodParameter{}, true, fmt.Errorf("%s: %w", use, err)
+	}
+	if err := validateStreamMessage(files, message); err != nil {
+		return methodParameter{}, true, fmt.Errorf("%s message %q: %w", use, message, err)
+	}
+	return methodParameter{kind: methodSenderParameter, message: message}, true, nil
+}
+
+func fileForExpr(files []*ast.File, expr ast.Expr) *ast.File {
+	for _, file := range files {
+		if file.Pos() <= expr.Pos() && expr.End() <= file.End() {
+			return file
+		}
+	}
+	return nil
+}
+
+func resolveStreamImport(file *ast.File, packageExpr ast.Expr, use string) error {
+	ident, ok := packageExpr.(*ast.Ident)
+	if !ok {
+		return fmt.Errorf("%s must use a package imported from %q", use, streamImportPath)
+	}
+	for _, spec := range file.Imports {
+		importPath, err := strconv.Unquote(spec.Path.Value)
+		if err != nil {
+			continue
+		}
+		name := path.Base(importPath)
+		if spec.Name != nil {
+			name = spec.Name.Name
+		}
+		if name != ident.Name {
+			continue
+		}
+		if importPath != streamImportPath {
+			return fmt.Errorf("%s must be imported from %q", use, streamImportPath)
+		}
+		return nil
+	}
+	return fmt.Errorf("%s package name %q is not imported from %q", use, ident.Name, streamImportPath)
+}
+
+func streamMessageArgument(expr ast.Expr) (string, error) {
+	if ident, ok := expr.(*ast.Ident); ok {
+		return ident.Name, nil
+	}
+	switch expr.(type) {
+	case *ast.StarExpr:
+		return "", errors.New("message type argument must not be a pointer")
+	case *ast.SelectorExpr:
+		return "", errors.New("imported message types are unsupported; use a local struct message")
+	case *ast.IndexExpr, *ast.IndexListExpr:
+		return "", errors.New("message type argument must be a non-generic local named type")
+	default:
+		return "", errors.New("message type argument must be a local named type")
+	}
+}
+
+func validateStreamMessage(files []*ast.File, name string) error {
+	var found *ast.TypeSpec
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			group, ok := decl.(*ast.GenDecl)
+			if !ok || group.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range group.Specs {
+				typeSpec := spec.(*ast.TypeSpec)
+				if typeSpec.Name.Name != name {
+					continue
+				}
+				if found != nil {
+					return errors.New("is ambiguous; declare one local struct message")
+				}
+				found = typeSpec
+			}
+		}
+	}
+	if found == nil {
+		return errors.New("is unresolved")
+	}
+	if found.Assign.IsValid() {
+		return errors.New("is an alias")
+	}
+	if found.TypeParams != nil && len(found.TypeParams.List) != 0 {
+		return errors.New("must not be generic")
+	}
+	if _, ok := found.Type.(*ast.StructType); !ok {
+		return errors.New("must be a local struct declaration")
+	}
+	return nil
 }
 
 func fieldComment(field *ast.Field) string {

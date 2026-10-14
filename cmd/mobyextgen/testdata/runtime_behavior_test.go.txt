@@ -1,0 +1,390 @@
+// SPDX-FileCopyrightText: Copyright The Moby Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package contract_test
+
+import (
+	"context"
+	"errors"
+	"net"
+	"sync"
+	"testing"
+	"time"
+
+	contract "__CONTRACT_IMPORT__"
+	protogen "__PROTOGEN_IMPORT__"
+
+	"github.com/moby/extensions/stream"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/wrapperspb"
+	"gotest.tools/v3/assert"
+)
+
+type provider struct {
+	downloadValues []int32
+	downloadNil    bool
+	downloadErr    error
+	downloadWait   <-chan struct{}
+	downloadStart  chan struct{}
+	downloadDone   chan struct{}
+
+	downloadStartOnce sync.Once
+	downloadDoneOnce  sync.Once
+
+	unaryErr  error
+	legacyErr error
+}
+
+var _ contract.Service = (*provider)(nil)
+
+func (p *provider) Unary(_ context.Context, req *contract.Request) (*contract.Reply, error) {
+	if p.unaryErr != nil {
+		return nil, p.unaryErr
+	}
+	return &contract.Reply{Values: []int32{req.Value}}, nil
+}
+
+func (p *provider) Remove(context.Context, *contract.Request) error {
+	return p.legacyErr
+}
+
+func (p *provider) Download(ctx context.Context, _ *contract.Request, sender stream.Sender[contract.Chunk]) error {
+	return p.download(ctx, sender)
+}
+
+func (p *provider) DownloadAgain(ctx context.Context, _ *contract.Request, sender stream.Sender[contract.Chunk]) error {
+	return p.download(ctx, sender)
+}
+
+func (p *provider) download(ctx context.Context, sender stream.Sender[contract.Chunk]) error {
+	p.signalDownloadStart()
+	defer p.signalDownloadDone()
+	if p.downloadNil {
+		return sender.Send(nil)
+	}
+	for _, value := range p.downloadValues {
+		message := &contract.Chunk{Value: value}
+		if err := sender.Send(message); err != nil {
+			return err
+		}
+	}
+	if p.downloadWait != nil {
+		select {
+		case <-p.downloadWait:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return p.downloadErr
+}
+
+func (p *provider) signalDownloadStart() {
+	if p.downloadStart != nil {
+		p.downloadStartOnce.Do(func() { close(p.downloadStart) })
+	}
+}
+
+func (p *provider) signalDownloadDone() {
+	if p.downloadDone != nil {
+		p.downloadDoneOnce.Do(func() { close(p.downloadDone) })
+	}
+}
+
+type runtimeMode struct {
+	name string
+	new  func(*testing.T, *provider) contract.Service
+}
+
+func runtimeModes() []runtimeMode {
+	return []runtimeMode{
+		{
+			name: "direct",
+			new: func(_ *testing.T, p *provider) contract.Service {
+				return p
+			},
+		},
+		{
+			name: "remote",
+			new: func(t *testing.T, p *provider) contract.Service {
+				return start(t, p)
+			},
+		},
+	}
+}
+
+func start(t *testing.T, p *provider) contract.Service {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	assert.NilError(t, err)
+	server := grpc.NewServer()
+	protogen.ServerPoint.Register(server, p)
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- server.Serve(listener) }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	conn, err := grpc.DialContext(
+		ctx,
+		listener.Addr().String(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithBlock(),
+	)
+	cancel()
+	if err != nil {
+		server.Stop()
+		<-serveDone
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = conn.Close()
+		server.Stop()
+		<-serveDone
+	})
+	return protogen.NewClient(conn)
+}
+
+func await(t *testing.T, signal <-chan struct{}) {
+	t.Helper()
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-signal:
+	case <-timer.C:
+		t.Fatal("timed out waiting for handler cleanup")
+	}
+}
+
+type release struct {
+	ch   chan struct{}
+	once sync.Once
+}
+
+func newRelease() *release {
+	return &release{ch: make(chan struct{})}
+}
+
+func (r *release) Close() {
+	r.once.Do(func() { close(r.ch) })
+}
+
+func asyncErrorCall(t *testing.T, call func() error) <-chan error {
+	t.Helper()
+	result := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		result <- call()
+		close(done)
+	}()
+	t.Cleanup(func() {
+		timer := time.NewTimer(10 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-timer.C:
+			t.Errorf("timed out waiting for asynchronous call")
+		}
+	})
+	return result
+}
+
+type sink struct {
+	values []int32
+	err    error
+	mu     sync.Mutex
+}
+
+func (s *sink) Send(message *contract.Chunk) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.mu.Lock()
+	s.values = append(s.values, message.Value)
+	s.mu.Unlock()
+	return nil
+}
+
+func detailError(code codes.Code, message, reason string) error {
+	st, err := status.New(code, message).WithDetails(wrapperspb.String(reason))
+	if err != nil {
+		panic(err)
+	}
+	return st.Err()
+}
+
+func assertDetail(t *testing.T, err error, code codes.Code, message, reason string) {
+	t.Helper()
+	st, ok := status.FromError(err)
+	assert.Assert(t, ok)
+	assert.Equal(t, st.Code(), code)
+	assert.Equal(t, st.Message(), message)
+	details := st.Details()
+	assert.Equal(t, len(details), 1)
+	info, ok := details[0].(*wrapperspb.StringValue)
+	assert.Assert(t, ok)
+	assert.Equal(t, info.Value, reason)
+}
+
+func TestUnaryAndBareError(t *testing.T) {
+	t.Parallel()
+	p := &provider{}
+	client := start(t, p)
+	reply, err := client.Unary(context.Background(), &contract.Request{Value: 7})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, reply.Values, []int32{7})
+	assert.NilError(t, client.Remove(context.Background(), &contract.Request{}))
+
+	p.unaryErr = errors.Join(errors.New("wrapped cancellation"), context.Canceled)
+	_, err = client.Unary(context.Background(), &contract.Request{})
+	assert.Equal(t, status.Code(err), codes.Canceled)
+}
+
+func TestDirectAndRemoteParity(t *testing.T) {
+	for _, mode := range runtimeModes() {
+		t.Run(mode.name, func(t *testing.T) {
+			t.Parallel()
+			t.Run("empty and multiple downloads", func(t *testing.T) {
+				p := &provider{}
+				client := mode.new(t, p)
+				got := &sink{}
+				assert.NilError(t, client.Download(context.Background(), &contract.Request{}, got))
+				assert.Equal(t, len(got.values), 0)
+
+				p = &provider{downloadValues: []int32{1, 2, 3}}
+				client = mode.new(t, p)
+				got = &sink{}
+				assert.NilError(t, client.Download(context.Background(), &contract.Request{}, got))
+				assert.DeepEqual(t, got.values, []int32{1, 2, 3})
+
+				p = &provider{downloadValues: []int32{4, 5}}
+				client = mode.new(t, p)
+				got = &sink{}
+				assert.NilError(t, client.DownloadAgain(context.Background(), &contract.Request{}, got))
+				assert.DeepEqual(t, got.values, []int32{4, 5})
+			})
+
+			t.Run("final status follows delivered download data", func(t *testing.T) {
+				p := &provider{
+					downloadValues: []int32{10, 20},
+					downloadErr:    detailError(codes.FailedPrecondition, "final rejection", "FINAL_REJECTION"),
+				}
+				client := mode.new(t, p)
+				got := &sink{}
+				err := client.Download(context.Background(), &contract.Request{}, got)
+				assert.DeepEqual(t, got.values, []int32{10, 20})
+				assertDetail(t, err, codes.FailedPrecondition, "final rejection", "FINAL_REJECTION")
+			})
+		})
+	}
+}
+
+func TestServerStreamingInvalidProviderMessage(t *testing.T) {
+	t.Parallel()
+	p := &provider{downloadNil: true}
+	client := start(t, p)
+	err := client.Download(context.Background(), &contract.Request{}, &sink{})
+	assert.Equal(t, status.Code(err), codes.Internal)
+}
+
+func TestDirectAndRemoteErrorIdentity(t *testing.T) {
+	for _, mode := range runtimeModes() {
+		t.Run(mode.name, func(t *testing.T) {
+			t.Parallel()
+			t.Run("destination error is local and exact", func(t *testing.T) {
+				p := &provider{
+					downloadValues: []int32{1},
+					downloadStart:  make(chan struct{}),
+					downloadDone:   make(chan struct{}),
+				}
+				client := mode.new(t, p)
+				destinationErr := errors.New("destination failed")
+				result := asyncErrorCall(t, func() error {
+					return client.Download(context.Background(), &contract.Request{}, &sink{err: destinationErr})
+				})
+				var started bool
+				select {
+				case <-p.downloadStart:
+					started = true
+				case err := <-result:
+					assert.Equal(t, err, destinationErr)
+				}
+				if started {
+					assert.Equal(t, <-result, destinationErr)
+					await(t, p.downloadDone)
+				}
+			})
+		})
+	}
+}
+
+func TestServerStreamingCallbacksAndCancellation(t *testing.T) {
+	t.Parallel()
+	t.Run("canceled transport cleans up handler", func(t *testing.T) {
+		release := newRelease()
+		p := &provider{
+			downloadWait:  release.ch,
+			downloadStart: make(chan struct{}),
+			downloadDone:  make(chan struct{}),
+		}
+		client := start(t, p)
+		ctx, cancel := context.WithCancel(context.Background())
+		result := asyncErrorCall(t, func() error {
+			return client.Download(ctx, &contract.Request{}, &sink{})
+		})
+		t.Cleanup(cancel)
+		t.Cleanup(release.Close)
+		await(t, p.downloadStart)
+		cancel()
+		assert.Equal(t, status.Code(<-result), codes.Canceled)
+		await(t, p.downloadDone)
+	})
+
+	t.Run("deadline does not require an unstarted handler", func(t *testing.T) {
+		release := newRelease()
+		p := &provider{
+			downloadWait:  release.ch,
+			downloadStart: make(chan struct{}),
+			downloadDone:  make(chan struct{}),
+		}
+		client := start(t, p)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		result := asyncErrorCall(t, func() error {
+			return client.Download(ctx, &contract.Request{}, &sink{})
+		})
+		t.Cleanup(cancel)
+		t.Cleanup(release.Close)
+
+		var started bool
+		select {
+		case <-p.downloadStart:
+			started = true
+		case err := <-result:
+			assert.Equal(t, status.Code(err), codes.DeadlineExceeded)
+		}
+		if started {
+			assert.Equal(t, status.Code(<-result), codes.DeadlineExceeded)
+			await(t, p.downloadDone)
+		}
+	})
+}
+
+func TestDirectContextCancellation(t *testing.T) {
+	t.Parallel()
+	release := newRelease()
+	p := &provider{
+		downloadWait:  release.ch,
+		downloadStart: make(chan struct{}),
+		downloadDone:  make(chan struct{}),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	result := asyncErrorCall(t, func() error {
+		return p.Download(ctx, &contract.Request{}, &sink{})
+	})
+	t.Cleanup(cancel)
+	t.Cleanup(release.Close)
+	await(t, p.downloadStart)
+	cancel()
+	assert.Equal(t, <-result, context.Canceled)
+	await(t, p.downloadDone)
+}

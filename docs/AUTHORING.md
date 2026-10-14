@@ -150,6 +150,11 @@ The generated package exports:
 - `ClientPoint`, for host wiring to a launched provider;
 - `NewClient(conn)`, which returns the handwritten Go interface over a gRPC connection.
 
+A contract can also declare server-streaming methods with `stream.Sender[Message]`.
+The handwritten provider interface keeps its Go types.
+The generated adapters make these methods available as protobuf streaming RPCs.
+The generator rejects all other stream parameter and result shapes.
+
 The contract package does not import protobuf packages; generated code belongs in `protogen/`.
 The generator derives the import path from `go.mod` and the proto file name
 from the inferred service identity.

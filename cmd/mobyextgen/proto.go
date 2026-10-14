@@ -30,6 +30,8 @@ func emitProto(pt point) ([]byte, error) {
 		case methodUnary:
 		case methodServerStreaming:
 			response = "stream " + response
+		case methodClientStreaming:
+			request = "stream " + request
 		default:
 			return nil, fmt.Errorf("%s: unknown method kind %d", m.name, m.kind)
 		}

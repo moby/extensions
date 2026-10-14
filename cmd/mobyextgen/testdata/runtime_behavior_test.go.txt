@@ -6,8 +6,10 @@ package contract_test
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,8 +36,18 @@ type provider struct {
 	downloadStartOnce sync.Once
 	downloadDoneOnce  sync.Once
 
-	unaryErr  error
-	legacyErr error
+	uploadErr         error
+	uploadRejectAfter int
+	uploadWait        <-chan struct{}
+	uploadStart       chan struct{}
+	uploadDone        chan struct{}
+	uploadObservedErr error
+	uploadDoneOnce    sync.Once
+	uploadStartOnce   sync.Once
+	uploadValues      []int32
+	uploadFinalized   atomic.Bool
+	unaryErr          error
+	legacyErr         error
 }
 
 var _ contract.Service = (*provider)(nil)
@@ -81,6 +93,55 @@ func (p *provider) download(ctx context.Context, sender stream.Sender[contract.C
 	return p.downloadErr
 }
 
+func (p *provider) Upload(ctx context.Context, receiver stream.Receiver[contract.Chunk]) (*contract.Reply, error) {
+	values, err := p.receive(ctx, receiver)
+	if err != nil {
+		return nil, err
+	}
+	return &contract.Reply{Values: values}, nil
+}
+
+func (p *provider) UploadAgain(ctx context.Context, receiver stream.Receiver[contract.Chunk]) (*contract.AlternateReply, error) {
+	values, err := p.receive(ctx, receiver)
+	if err != nil {
+		return nil, err
+	}
+	return &contract.AlternateReply{Values: values, Marker: "alternate"}, nil
+}
+
+func (p *provider) receive(ctx context.Context, receiver stream.Receiver[contract.Chunk]) ([]int32, error) {
+	p.signalUploadStart()
+	defer p.signalUploadDone()
+	for {
+		message, err := receiver.Recv()
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				p.uploadObservedErr = err
+				return nil, err
+			}
+			p.uploadFinalized.Store(true)
+			return append([]int32(nil), p.uploadValues...), nil
+		}
+		if message == nil {
+			err := errors.New("provider received nil message")
+			p.uploadObservedErr = err
+			return nil, err
+		}
+		p.uploadValues = append(p.uploadValues, message.Value)
+		if p.uploadRejectAfter > 0 && len(p.uploadValues) >= p.uploadRejectAfter {
+			return nil, p.uploadErr
+		}
+		if p.uploadWait != nil {
+			select {
+			case <-p.uploadWait:
+			case <-ctx.Done():
+				p.uploadObservedErr = ctx.Err()
+				return nil, ctx.Err()
+			}
+		}
+	}
+}
+
 func (p *provider) signalDownloadStart() {
 	if p.downloadStart != nil {
 		p.downloadStartOnce.Do(func() { close(p.downloadStart) })
@@ -90,6 +151,18 @@ func (p *provider) signalDownloadStart() {
 func (p *provider) signalDownloadDone() {
 	if p.downloadDone != nil {
 		p.downloadDoneOnce.Do(func() { close(p.downloadDone) })
+	}
+}
+
+func (p *provider) signalUploadStart() {
+	if p.uploadStart != nil {
+		p.uploadStartOnce.Do(func() { close(p.uploadStart) })
+	}
+}
+
+func (p *provider) signalUploadDone() {
+	if p.uploadDone != nil {
+		p.uploadDoneOnce.Do(func() { close(p.uploadDone) })
 	}
 }
 
@@ -189,6 +262,72 @@ func asyncErrorCall(t *testing.T, call func() error) <-chan error {
 	return result
 }
 
+type uploadResult struct {
+	reply *contract.Reply
+	err   error
+}
+
+func asyncUploadCall(t *testing.T, call func() (*contract.Reply, error)) <-chan uploadResult {
+	t.Helper()
+	result := make(chan uploadResult, 1)
+	done := make(chan struct{})
+	go func() {
+		reply, err := call()
+		result <- uploadResult{reply: reply, err: err}
+		close(done)
+	}()
+	t.Cleanup(func() {
+		timer := time.NewTimer(10 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-timer.C:
+			t.Errorf("timed out waiting for asynchronous upload")
+		}
+	})
+	return result
+}
+
+type source struct {
+	ready  <-chan struct{}
+	values []*contract.Chunk
+	last   error
+	index  int
+}
+
+func (s *source) Recv() (*contract.Chunk, error) {
+	if s.ready != nil {
+		ready := s.ready
+		s.ready = nil
+		<-ready
+	}
+	if s.index < len(s.values) {
+		message := s.values[s.index]
+		s.index++
+		return message, nil
+	}
+	return nil, s.last
+}
+
+type contextSource struct {
+	ctx     context.Context
+	values  []*contract.Chunk
+	index   int
+	started chan struct{}
+	once    sync.Once
+}
+
+func (s *contextSource) Recv() (*contract.Chunk, error) {
+	if s.index < len(s.values) {
+		message := s.values[s.index]
+		s.index++
+		return message, nil
+	}
+	s.once.Do(func() { close(s.started) })
+	<-s.ctx.Done()
+	return nil, s.ctx.Err()
+}
+
 type sink struct {
 	values []int32
 	err    error
@@ -264,6 +403,34 @@ func TestDirectAndRemoteParity(t *testing.T) {
 				assert.DeepEqual(t, got.values, []int32{4, 5})
 			})
 
+			t.Run("empty and multiple uploads", func(t *testing.T) {
+				p := &provider{}
+				client := mode.new(t, p)
+				reply, err := client.Upload(context.Background(), &source{last: io.EOF})
+				assert.NilError(t, err)
+				assert.Equal(t, len(reply.Values), 0)
+
+				p = &provider{}
+				client = mode.new(t, p)
+				reply, err = client.Upload(context.Background(), &source{
+					values: []*contract.Chunk{{Value: 2}, {Value: 4}, {Value: 6}},
+					last:   errors.Join(errors.New("input complete"), io.EOF),
+				})
+				assert.NilError(t, err)
+				assert.DeepEqual(t, reply.Values, []int32{2, 4, 6})
+				assert.Assert(t, p.uploadFinalized.Load())
+
+				p = &provider{}
+				client = mode.new(t, p)
+				alternate, err := client.UploadAgain(context.Background(), &source{
+					values: []*contract.Chunk{{Value: 8}},
+					last:   io.EOF,
+				})
+				assert.NilError(t, err)
+				assert.DeepEqual(t, alternate.Values, []int32{8})
+				assert.Equal(t, alternate.Marker, "alternate")
+			})
+
 			t.Run("final status follows delivered download data", func(t *testing.T) {
 				p := &provider{
 					downloadValues: []int32{10, 20},
@@ -312,6 +479,33 @@ func TestDirectAndRemoteErrorIdentity(t *testing.T) {
 				if started {
 					assert.Equal(t, <-result, destinationErr)
 					await(t, p.downloadDone)
+				}
+			})
+
+			t.Run("source error is local and not a clean EOF", func(t *testing.T) {
+				sourceErr := errors.New("source failed")
+				p := &provider{
+					uploadStart: make(chan struct{}),
+					uploadDone:  make(chan struct{}),
+				}
+				client := mode.new(t, p)
+				source := &source{
+					ready:  p.uploadStart,
+					values: []*contract.Chunk{{Value: 3}},
+					last:   sourceErr,
+				}
+				result := asyncUploadCall(t, func() (*contract.Reply, error) {
+					return client.Upload(context.Background(), source)
+				})
+				t.Cleanup(p.signalUploadStart)
+				await(t, p.uploadStart)
+				assert.Equal(t, (<-result).err, sourceErr)
+				await(t, p.uploadDone)
+				assert.Assert(t, !p.uploadFinalized.Load())
+				if mode.name == "direct" {
+					assert.Equal(t, p.uploadObservedErr, sourceErr)
+				} else {
+					assert.Assert(t, p.uploadObservedErr != sourceErr)
 				}
 			})
 		})
@@ -369,6 +563,46 @@ func TestServerStreamingCallbacksAndCancellation(t *testing.T) {
 	})
 }
 
+func TestClientStreamingInvalidInputAndProviderStatus(t *testing.T) {
+	t.Parallel()
+	t.Run("nil source message is invalid", func(t *testing.T) {
+		p := &provider{
+			uploadStart: make(chan struct{}),
+			uploadDone:  make(chan struct{}),
+		}
+		client := start(t, p)
+		source := &source{
+			ready:  p.uploadStart,
+			values: []*contract.Chunk{nil},
+			last:   io.EOF,
+		}
+		result := asyncUploadCall(t, func() (*contract.Reply, error) {
+			return client.Upload(context.Background(), source)
+		})
+		t.Cleanup(p.signalUploadStart)
+		await(t, p.uploadStart)
+		assert.Equal(t, status.Code((<-result).err), codes.InvalidArgument)
+		await(t, p.uploadDone)
+		assert.Assert(t, !p.uploadFinalized.Load())
+	})
+
+	t.Run("provider final status survives early rejection", func(t *testing.T) {
+		p := &provider{
+			uploadErr:         detailError(codes.ResourceExhausted, "quota", "UPLOAD_QUOTA"),
+			uploadRejectAfter: 1,
+			uploadDone:        make(chan struct{}),
+		}
+		client := start(t, p)
+		_, err := client.Upload(context.Background(), &source{
+			values: []*contract.Chunk{{Value: 1}, {Value: 2}, {Value: 3}},
+			last:   io.EOF,
+		})
+		assertDetail(t, err, codes.ResourceExhausted, "quota", "UPLOAD_QUOTA")
+		await(t, p.uploadDone)
+		assert.Assert(t, !p.uploadFinalized.Load())
+	})
+}
+
 func TestDirectContextCancellation(t *testing.T) {
 	t.Parallel()
 	release := newRelease()
@@ -387,4 +621,32 @@ func TestDirectContextCancellation(t *testing.T) {
 	cancel()
 	assert.Equal(t, <-result, context.Canceled)
 	await(t, p.downloadDone)
+}
+
+func TestClientStreamingCancellationCleansUpHandler(t *testing.T) {
+	t.Parallel()
+	release := newRelease()
+	p := &provider{
+		uploadStart: make(chan struct{}),
+		uploadDone:  make(chan struct{}),
+		uploadWait:  release.ch,
+	}
+	client := start(t, p)
+	ctx, cancel := context.WithCancel(context.Background())
+	source := &contextSource{
+		ctx:     ctx,
+		values:  []*contract.Chunk{{Value: 9}},
+		started: make(chan struct{}),
+	}
+	result := asyncUploadCall(t, func() (*contract.Reply, error) {
+		return client.Upload(ctx, source)
+	})
+	t.Cleanup(cancel)
+	t.Cleanup(release.Close)
+	t.Cleanup(p.signalUploadStart)
+	await(t, p.uploadStart)
+	await(t, source.started)
+	cancel()
+	assert.Equal(t, (<-result).err, context.Canceled)
+	await(t, p.uploadDone)
 }

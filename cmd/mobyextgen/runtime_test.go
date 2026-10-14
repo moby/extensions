@@ -35,6 +35,11 @@ func TestGeneratedStreamingRuntime(t *testing.T) {
 		"__PROTOGEN_IMPORT__", path.Join(importPath, "protogen"),
 	).Replace(readFixture(t, "runtime_behavior_test.go.txt"))
 	assert.NilError(t, os.WriteFile(filepath.Join(dir, "runtime_test.go"), []byte(behavior), 0o644))
+	transport := strings.NewReplacer(
+		"__CONTRACT_IMPORT__", importPath,
+		"__PROTOGEN_IMPORT__", path.Join(importPath, "protogen"),
+	).Replace(readFixture(t, "runtime_transport_test.go.txt"))
+	assert.NilError(t, os.WriteFile(filepath.Join(dir, "runtime_transport_test.go"), []byte(transport), 0o644))
 	assert.NilError(t, run(dir, ""))
 
 	for _, fixture := range []struct {
@@ -51,6 +56,11 @@ func TestGeneratedStreamingRuntime(t *testing.T) {
 			name:   "serverstream",
 			source: "runtime_server_contract.go.txt",
 			id:     "org.example.generated.serverstream.v1.Service",
+		},
+		{
+			name:   "clientstream",
+			source: "runtime_client_contract.go.txt",
+			id:     "org.example.generated.clientstream.v1.Service",
 		},
 	} {
 		subdir := filepath.Join(dir, fixture.name)

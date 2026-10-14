@@ -15,6 +15,8 @@ type Service interface {
 	Remove(context.Context, *Request) error
 	Download(context.Context, *Request, stream.Sender[Chunk]) error
 	DownloadAgain(context.Context, *Request, stream.Sender[Chunk]) error
+	Upload(context.Context, stream.Receiver[Chunk]) (*Reply, error)
+	UploadAgain(context.Context, stream.Receiver[Chunk]) (*AlternateReply, error)
 }
 
 type Request struct {
@@ -28,6 +30,11 @@ type Chunk struct {
 
 type Reply struct {
 	Values []int32 `pb:"1"`
+}
+
+type AlternateReply struct {
+	Values []int32 `pb:"1"`
+	Marker string  `pb:"2"`
 }
 
 var Point = ext.DefinePoint[Service]("org.example.generated.runtime.v1")

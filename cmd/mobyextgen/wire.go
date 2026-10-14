@@ -81,6 +81,8 @@ func emitWire(pt point) ([]byte, error) {
 			fmt.Fprintf(&b, "\t%s(context.Context, *%s) (*%s, error)\n", m.name, m.request, m.response)
 		case methodServerStreaming:
 			fmt.Fprintf(&b, "\t%s(*%s, grpc.ServerStreamingServer[%s]) error\n", m.name, m.request, m.response)
+		case methodClientStreaming:
+			fmt.Fprintf(&b, "\t%s(grpc.ClientStreamingServer[%s, %s]) error\n", m.name, m.request, m.response)
 		}
 	}
 	fmt.Fprintln(&b, "}")
@@ -114,6 +116,8 @@ func emitWire(pt point) ([]byte, error) {
 			fmt.Fprintf(&b, "\t\t\t{StreamName: %q, Handler: %s", m.name, handlerName(m))
 			if m.kind == methodServerStreaming {
 				fmt.Fprint(&b, ", ServerStreams: true")
+			} else {
+				fmt.Fprint(&b, ", ClientStreams: true")
 			}
 			fmt.Fprintln(&b, "},")
 		}
@@ -149,6 +153,12 @@ func emitWire(pt point) ([]byte, error) {
 		return srv.(%[3]sServer).%[4]s(in, &grpc.GenericServerStream[%[2]s, %[5]s]{ServerStream: stream})
 	}
 	`, handlerName(m), m.request, svc, m.name, m.response)
+		case methodClientStreaming:
+			fmt.Fprintf(&b, `
+	func %[1]s(srv any, stream grpc.ServerStream) error {
+		return srv.(%[2]sServer).%[3]s(&grpc.GenericServerStream[%[4]s, %[5]s]{ServerStream: stream})
+	}
+	`, handlerName(m), svc, m.name, m.request, m.response)
 		}
 	}
 
@@ -173,6 +183,8 @@ func emitWire(pt point) ([]byte, error) {
 			fmt.Fprintf(&b, "\t%s(ctx context.Context, in *%s, opts ...grpc.CallOption) (*%s, error)\n", m.name, m.request, m.response)
 		case methodServerStreaming:
 			fmt.Fprintf(&b, "\t%s(ctx context.Context, in *%s, opts ...grpc.CallOption) (grpc.ServerStreamingClient[%s], error)\n", m.name, m.request, m.response)
+		case methodClientStreaming:
+			fmt.Fprintf(&b, "\t%s(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[%s, %s], error)\n", m.name, m.request, m.response)
 		}
 	}
 	fmt.Fprintln(&b, "}")
@@ -214,6 +226,16 @@ func emitWire(pt point) ([]byte, error) {
 			return nil, err
 		}
 		return x, nil
+	}
+	`, m.name, m.request, m.response, streamIndices[m.name], methodConst(m))
+		case methodClientStreaming:
+			fmt.Fprintf(&b, `
+	func (c *serviceClient) %[1]s(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[%[2]s, %[3]s], error) {
+		stream, err := c.cc.NewStream(ctx, &serviceDesc.Streams[%[4]d], %[5]s, append([]grpc.CallOption{grpc.StaticMethod()}, opts...)...)
+		if err != nil {
+			return nil, err
+		}
+		return &grpc.GenericClientStream[%[2]s, %[3]s]{ClientStream: stream}, nil
 	}
 	`, m.name, m.request, m.response, streamIndices[m.name], methodConst(m))
 		}
@@ -291,20 +313,43 @@ func emitWire(pt point) ([]byte, error) {
 			fmt.Fprintf(&b, `
 	func (s *grpcServer) %[1]s(req *%[2]s, out grpc.ServerStreamingServer[%[3]s]) error {
 		sender := &mobyext%[1]sSender{stream: out}
-		return s.impl.%[1]s(out.Context(), %[5]sFromProto(req), sender)
+		return s.impl.%[1]s(out.Context(), %[4]sFromProto(req), sender)
 	}
 
 	type mobyext%[1]sSender struct {
 		stream grpc.ServerStreamingServer[%[3]s]
 	}
 
-	func (s *mobyext%[1]sSender) Send(message *%[6]s.%[7]s) error {
+	func (s *mobyext%[1]sSender) Send(message *%[5]s.%[6]s) error {
 		if message == nil {
-			return status.Error(codes.Internal, %[8]q)
+			return status.Error(codes.Internal, %[7]q)
 		}
-		return s.stream.Send(%[9]sToProto(message))
+		return s.stream.Send(%[8]sToProto(message))
 	}
-	`, m.name, m.request, m.response, lowerFirst(m.name), lowerFirst(m.request), cpkg, m.response, m.name+": nil message", lowerFirst(m.response))
+	`, m.name, m.request, m.response, lowerFirst(m.request), cpkg, m.response, m.name+": nil message", lowerFirst(m.response))
+		case methodClientStreaming:
+			fmt.Fprintf(&b, `
+	func (s *grpcServer) %[1]s(stream grpc.ClientStreamingServer[%[2]s, %[3]s]) error {
+		receiver := &mobyext%[1]sReceiver{stream: stream}
+		resp, err := s.impl.%[1]s(stream.Context(), receiver)
+		if err != nil {
+			return err
+		}
+		return stream.SendAndClose(%[4]sToProto(resp))
+	}
+
+	type mobyext%[1]sReceiver struct {
+		stream grpc.ClientStreamingServer[%[2]s, %[3]s]
+	}
+
+	func (r *mobyext%[1]sReceiver) Recv() (*%[5]s.%[6]s, error) {
+		message, err := r.stream.Recv()
+		if err != nil {
+			return nil, err
+		}
+		return %[7]sFromProto(message), nil
+	}
+	`, m.name, m.request, m.response, lowerFirst(m.response), cpkg, m.request, lowerFirst(m.request))
 		}
 	}
 
@@ -360,6 +405,46 @@ func emitWire(pt point) ([]byte, error) {
 		}
 	}
 	`, m.name, cpkg, m.request, m.response, lowerFirst(m.request), lowerFirst(m.response))
+		case methodClientStreaming:
+			fmt.Fprintf(&b, `
+	func (c *grpcClient) %[1]s(ctx context.Context, source extensionstream.Receiver[%[2]s.%[3]s]) (*%[2]s.%[4]s, error) {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		stream, err := c.client.%[1]s(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for {
+			message, err := source.Recv()
+			if err != nil {
+				if !errors.Is(err, io.EOF) {
+					return nil, err
+				}
+				resp, err := stream.CloseAndRecv()
+				if err != nil {
+					return nil, err
+				}
+				return %[5]sFromProto(resp), nil
+			}
+			if message == nil {
+				return nil, status.Error(codes.InvalidArgument, %[6]q)
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, status.FromContextError(err).Err()
+			}
+			if err := stream.Send(%[7]sToProto(message)); err != nil {
+				if !errors.Is(err, io.EOF) {
+					return nil, err
+				}
+				resp, err := stream.CloseAndRecv()
+				if err != nil {
+					return nil, err
+				}
+				return %[5]sFromProto(resp), nil
+			}
+		}
+	}
+	`, m.name, cpkg, m.request, m.response, lowerFirst(m.response), m.name+": nil message", lowerFirst(m.request))
 		}
 	}
 

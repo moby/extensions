@@ -38,6 +38,7 @@ type methodKind int
 const (
 	methodUnary methodKind = iota
 	methodServerStreaming
+	methodClientStreaming
 )
 
 type message struct {

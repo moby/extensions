@@ -307,6 +307,18 @@ func parseMethods(files []*ast.File, iface *ast.InterfaceType) ([]method, error)
 				kind: methodServerStreaming, name: name,
 				request: params[1].message, response: params[2].message, doc: doc,
 			})
+		case len(params) == 2 && params[0].kind == methodContextParameter && params[1].kind == methodReceiverParameter:
+			if len(res) != 2 || !isIdent(res[1], "error") {
+				return nil, methodShapeError(name)
+			}
+			response, err := pointerIdent(res[0])
+			if err != nil {
+				return nil, methodShapeError(name)
+			}
+			methods = append(methods, method{
+				kind: methodClientStreaming, name: name,
+				request: params[1].message, response: response, doc: doc,
+			})
 		default:
 			return nil, methodShapeError(name)
 		}
@@ -320,6 +332,7 @@ const (
 	methodContextParameter methodParameterKind = iota + 1
 	methodMessageParameter
 	methodSenderParameter
+	methodReceiverParameter
 )
 
 type methodParameter struct {
@@ -328,8 +341,9 @@ type methodParameter struct {
 }
 
 const acceptedMethodShapes = "accepted shapes are M(context.Context, *Request) (*Reply, error), " +
-	"M(context.Context, *Request) error, and " +
-	"M(context.Context, *Request, stream.Sender[Chunk]) error"
+	"M(context.Context, *Request) error, " +
+	"M(context.Context, *Request, stream.Sender[Chunk]) error, and " +
+	"M(context.Context, stream.Receiver[Chunk]) (*Reply, error)"
 
 func methodShapeError(name string) error {
 	return fmt.Errorf("method %q: unsupported signature; %s", name, acceptedMethodShapes)
@@ -354,8 +368,8 @@ func classifyMethodParameter(files []*ast.File, expr ast.Expr, index int) (metho
 	return methodParameter{kind: methodMessageParameter, message: message}, nil
 }
 
-// parseStreamParameter reports whether expr names stream.Sender and, if so,
-// validates its import and message argument.
+// parseStreamParameter reports whether expr names stream.Sender or
+// stream.Receiver and, if so, validates its import and message argument.
 func parseStreamParameter(files []*ast.File, expr ast.Expr) (methodParameter, bool, error) {
 	var (
 		selector *ast.SelectorExpr
@@ -373,7 +387,7 @@ func parseStreamParameter(files []*ast.File, expr ast.Expr) (methodParameter, bo
 	default:
 		return methodParameter{}, false, nil
 	}
-	if selector == nil || selector.Sel.Name != "Sender" {
+	if selector == nil || (selector.Sel.Name != "Sender" && selector.Sel.Name != "Receiver") {
 		return methodParameter{}, false, nil
 	}
 	use := "stream." + selector.Sel.Name
@@ -394,7 +408,11 @@ func parseStreamParameter(files []*ast.File, expr ast.Expr) (methodParameter, bo
 	if err := validateStreamMessage(files, message); err != nil {
 		return methodParameter{}, true, fmt.Errorf("%s message %q: %w", use, message, err)
 	}
-	return methodParameter{kind: methodSenderParameter, message: message}, true, nil
+	kind := methodSenderParameter
+	if selector.Sel.Name == "Receiver" {
+		kind = methodReceiverParameter
+	}
+	return methodParameter{kind: kind, message: message}, true, nil
 }
 
 func fileForExpr(files []*ast.File, expr ast.Expr) *ast.File {

@@ -85,6 +85,9 @@ func fileDescriptor(pt point) (*descriptorpb.FileDescriptorProto, error) {
 			InputType:  new("." + pt.id + "." + m.request),
 			OutputType: new("." + pt.id + "." + m.response),
 		}
+		if m.kind == methodClientStreaming {
+			method.ClientStreaming = new(true)
+		}
 		if m.kind == methodServerStreaming {
 			method.ServerStreaming = new(true)
 		}

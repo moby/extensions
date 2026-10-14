@@ -1,0 +1,22 @@
+// SPDX-FileCopyrightText: Copyright The Moby Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package contract
+
+import (
+	"context"
+
+	stream "github.com/moby/extensions/stream"
+)
+
+type Service interface {
+	Upload(context.Context, stream.Receiver[Chunk]) (*Reply, error)
+}
+
+type Chunk struct {
+	Value int32 `pb:"1"`
+}
+
+type Reply struct {
+	Value int32 `pb:"1"`
+}

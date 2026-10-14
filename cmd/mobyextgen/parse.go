@@ -256,30 +256,75 @@ func parseMethods(iface *ast.InterfaceType) ([]method, error) {
 			continue
 		}
 		name := m.Names[0].Name
-		doc := fieldComment(m)
-		if ft.Params == nil || len(ft.Params.List) == 0 {
-			return nil, fmt.Errorf("method %q: expected a request parameter", name)
-		}
-		reqType := ft.Params.List[len(ft.Params.List)-1].Type
-		req, err := pointerIdent(reqType)
-		if err != nil {
-			return nil, fmt.Errorf("method %q request: %w", name, err)
+		paramFields := fieldsPerName(ft.Params)
+		params := make([]methodParameter, len(paramFields))
+		for i, param := range paramFields {
+			var err error
+			params[i], err = classifyMethodParameter(param.Type, i)
+			if err != nil {
+				return nil, fmt.Errorf("method %q parameter %d: %w", name, i+1, err)
+			}
 		}
 		res := results(ft)
+
+		doc := fieldComment(m)
 		switch {
-		case len(res) == 1 && isIdent(res[0], "error"):
-			methods = append(methods, method{name: name, request: req, response: name + "Response", bareError: true, doc: doc})
-		case len(res) == 2 && isIdent(res[1], "error"):
-			resp, err := pointerIdent(res[0])
-			if err != nil {
-				return nil, fmt.Errorf("method %q response: %w", name, err)
+		case len(params) == 2 && params[0].kind == methodContextParameter && params[1].kind == methodMessageParameter:
+			var (
+				response  string
+				bareError bool
+			)
+			switch {
+			case len(res) == 1 && isIdent(res[0], "error"):
+				response, bareError = name+"Response", true
+			case len(res) == 2 && isIdent(res[1], "error"):
+				var err error
+				response, err = pointerIdent(res[0])
+				if err != nil {
+					return nil, methodShapeError(name)
+				}
+			default:
+				return nil, methodShapeError(name)
 			}
-			methods = append(methods, method{name: name, request: req, response: resp, doc: doc})
+			methods = append(methods, method{
+				name: name, request: params[1].message, response: response,
+				bareError: bareError, doc: doc,
+			})
 		default:
-			return nil, fmt.Errorf("method %q: result must be `error` or `(*Resp, error)`", name)
+			return nil, methodShapeError(name)
 		}
 	}
 	return methods, nil
+}
+
+type methodParameterKind int
+
+const (
+	methodContextParameter methodParameterKind = iota + 1
+	methodMessageParameter
+)
+
+type methodParameter struct {
+	kind    methodParameterKind
+	message string
+}
+
+const acceptedMethodShapes = "accepted shapes are M(context.Context, *Request) (*Reply, error) and " +
+	"M(context.Context, *Request) error"
+
+func methodShapeError(name string) error {
+	return fmt.Errorf("method %q: unsupported signature; %s", name, acceptedMethodShapes)
+}
+
+func classifyMethodParameter(expr ast.Expr, index int) (methodParameter, error) {
+	if index == 0 {
+		return methodParameter{kind: methodContextParameter}, nil
+	}
+	message, err := pointerIdent(expr)
+	if err != nil {
+		return methodParameter{}, err
+	}
+	return methodParameter{kind: methodMessageParameter, message: message}, nil
 }
 
 func fieldComment(field *ast.Field) string {
@@ -514,17 +559,23 @@ func isIdent(expr ast.Expr, name string) bool {
 }
 
 func results(ft *ast.FuncType) []ast.Expr {
-	if ft.Results == nil {
+	var out []ast.Expr
+	for _, f := range fieldsPerName(ft.Results) {
+		out = append(out, f.Type)
+	}
+	return out
+}
+
+// fieldsPerName repeats each field once per declared name, so a grouped
+// declaration such as `a, b *T` counts as two entries.
+func fieldsPerName(list *ast.FieldList) []*ast.Field {
+	if list == nil {
 		return nil
 	}
-	var out []ast.Expr
-	for _, f := range ft.Results.List {
-		if len(f.Names) == 0 {
-			out = append(out, f.Type)
-			continue
-		}
-		for range f.Names {
-			out = append(out, f.Type)
+	var out []*ast.Field
+	for _, f := range list.List {
+		for range max(1, len(f.Names)) {
+			out = append(out, f)
 		}
 	}
 	return out

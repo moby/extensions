@@ -166,3 +166,14 @@ var Point = extensions.DefinePoint[Runtime]("example.api.v1")
 `, "example.api.v1.Runtime")
 	assert.ErrorContains(t, err, "cannot be used with an ordinary Point")
 }
+
+func TestRejectsGroupedExtraParameter(t *testing.T) {
+	_, err := parseSource(t, `package p
+import "github.com/moby/extensions"
+type Req struct{}
+type Resp struct{}
+type S interface{ Do(ctx interface{}, first, second *Req) (*Resp, error) }
+var Point = extensions.DefinePoint[S]("test.gen.v1")
+`)
+	assert.ErrorContains(t, err, "unsupported signature")
+}

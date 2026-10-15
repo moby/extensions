@@ -39,9 +39,11 @@ func TestGeneratedFilesInheritContractNotices(t *testing.T) {
 			assert.NilError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/contract\n"), 0o644))
 			const contract = `package contract
 
+import "context"
+
 // SPDX-FileCopyrightText: ignore comments after the package clause
 // SPDX-License-Identifier: ignore comments after the package clause
-type Runtime interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
+type Runtime interface{ Do(ctx context.Context, req *Req) (*Resp, error) }
 type Req struct{}
 type Resp struct{}
 `
@@ -88,8 +90,9 @@ func TestSingleMessageField(t *testing.T) {
 
 func TestInitialismFieldBridgesNames(t *testing.T) {
 	const src = `package p
+import "context"
 import "github.com/moby/extensions"
-type S interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
+type S interface{ Do(ctx context.Context, req *Req) (*Resp, error) }
 type Req struct{ ContainerID string ` + "`pb:\"1\"`" + ` }
 type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
 var Point = extensions.DefinePoint[S]("test.gen.v1")
@@ -114,10 +117,11 @@ var Point = extensions.DefinePoint[S]("test.gen.v1")
 
 func TestServiceContractWithoutAPoint(t *testing.T) {
 	const contract = `package p
+import "context"
 type Req struct{ Name string ` + "`pb:\"1\"`" + ` }
 type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
 
-type Runtime interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
+type Runtime interface{ Do(ctx context.Context, req *Req) (*Resp, error) }
 `
 	pt, err := parseServiceSource(t, contract, "my.proto.pkg.v1.Runtime")
 	assert.NilError(t, err)
@@ -140,13 +144,14 @@ type Runtime interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
 
 func TestOrdinaryPointGeneratesPublicationAndClientAPIs(t *testing.T) {
 	const contract = `package p
+import "context"
 import "github.com/moby/extensions"
 type Req struct{ Name string ` + "`pb:\"1\"`" + ` }
 type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
 
 type Runtime interface {
-	Do(ctx interface{}, req *Req) (*Resp, error)
-	Delete(ctx interface{}, req *Req) error
+	Do(ctx context.Context, req *Req) (*Resp, error)
+	Delete(ctx context.Context, req *Req) error
 }
 var Point = extensions.DefinePoint[Runtime]("my.proto.pkg.v1")
 `
@@ -173,8 +178,9 @@ var Point = extensions.DefinePoint[Runtime]("my.proto.pkg.v1")
 
 func TestReservedFieldNumbers(t *testing.T) {
 	const header = `package p
+import "context"
 import "github.com/moby/extensions"
-type S interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
+type S interface{ Do(ctx context.Context, req *Req) (*Resp, error) }
 type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
 
 var Point = extensions.DefinePoint[S]("test.gen.v1")
@@ -224,8 +230,9 @@ var Point = extensions.DefinePoint[S]("test.gen.v1")
 
 func TestSinglePointCardinality(t *testing.T) {
 	const contract = `package p
+import "context"
 import "github.com/moby/extensions"
-type S interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
+type S interface{ Do(ctx context.Context, req *Req) (*Resp, error) }
 type Req struct{ Name string ` + "`pb:\"1\"`" + ` }
 type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
 `

@@ -27,8 +27,9 @@ func parseServiceSource(t *testing.T, src, service string) (point, error) {
 
 func TestContractValidation(t *testing.T) {
 	const header = `package p
+import "context"
 import "github.com/moby/extensions"
-type S interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
+type S interface{ Do(ctx context.Context, req *Req) (*Resp, error) }
 type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
 var Point = extensions.DefinePoint[S]("test.gen.v1")
 `
@@ -127,8 +128,9 @@ var Point = extensions.DefinePoint[S]("test.gen.v1")
 
 func TestPointServiceName(t *testing.T) {
 	const contract = `package p
+import "context"
 import "github.com/moby/extensions"
-type S interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
+type S interface{ Do(ctx context.Context, req *Req) (*Resp, error) }
 type Req struct{ Name string ` + "`pb:\"1\"`" + ` }
 type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
 `
@@ -140,9 +142,10 @@ type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
 
 func TestExplicitNonPointService(t *testing.T) {
 	const contract = `package p
+import "context"
 type Req struct{ Name string ` + "`pb:\"1\"`" + ` }
 type Resp struct{ Ok bool ` + "`pb:\"1\"`" + ` }
-type Runtime interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
+type Runtime interface{ Do(ctx context.Context, req *Req) (*Resp, error) }
 `
 	pt, err := parseServiceSource(t, contract, "example.api.v1.Runtime")
 	assert.NilError(t, err)
@@ -157,10 +160,11 @@ type Runtime interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
 
 func TestExplicitServiceRejectsPointContract(t *testing.T) {
 	_, err := parseServiceSource(t, `package p
+import "context"
 import "github.com/moby/extensions"
 type Req struct{}
 type Resp struct{}
-type Runtime interface{ Do(ctx interface{}, req *Req) (*Resp, error) }
+type Runtime interface{ Do(ctx context.Context, req *Req) (*Resp, error) }
 
 var Point = extensions.DefinePoint[Runtime]("example.api.v1")
 `, "example.api.v1.Runtime")
@@ -169,10 +173,11 @@ var Point = extensions.DefinePoint[Runtime]("example.api.v1")
 
 func TestRejectsGroupedExtraParameter(t *testing.T) {
 	_, err := parseSource(t, `package p
+import "context"
 import "github.com/moby/extensions"
 type Req struct{}
 type Resp struct{}
-type S interface{ Do(ctx interface{}, first, second *Req) (*Resp, error) }
+type S interface{ Do(ctx context.Context, first, second *Req) (*Resp, error) }
 var Point = extensions.DefinePoint[S]("test.gen.v1")
 `)
 	assert.ErrorContains(t, err, "unsupported signature")

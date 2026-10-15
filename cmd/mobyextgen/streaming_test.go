@@ -91,6 +91,45 @@ type Chunk struct{}
 			want: acceptedMethodShapes,
 		},
 		{
+			name: "client stream without a context",
+			source: streamingPointSource(`type Service interface {
+	Upload(*Request, s.Receiver[Chunk]) (*Reply, error)
+}
+type Request struct{}
+type Chunk struct{}
+type Reply struct{}
+`),
+			want: "parameter 1: must be context.Context",
+		},
+		{
+			name: "server stream with a non-context first parameter",
+			source: streamingPointSource(`type Service interface {
+	Download(int, *Request, s.Sender[Chunk]) error
+}
+type Request struct{}
+type Chunk struct{}
+`),
+			want: "parameter 1: must be context.Context",
+		},
+		{
+			name: "context from another package",
+			source: `package contract
+
+import (
+	stdctx "example/context"
+	ext "github.com/moby/extensions"
+	s "github.com/moby/extensions/stream"
+)
+type Service interface {
+	Download(stdctx.Context, *Request, s.Sender[Chunk]) error
+}
+type Request struct{}
+type Chunk struct{}
+var Point = ext.DefinePoint[Service]("org.example.contract.v1")
+`,
+			want: "parameter 1: must be context.Context",
+		},
+		{
 			name: "pointer stream message argument",
 			source: streamingPointSource(`type Service interface {
 	Download(stdctx.Context, *Request, s.Sender[*Chunk]) error

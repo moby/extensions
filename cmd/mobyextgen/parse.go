@@ -358,6 +358,8 @@ func classifyMethodParameter(files []*ast.File, expr ast.Expr, index int) (metho
 		return methodParameter{}, errors.New("stream parameters cannot replace context.Context")
 	case isStream:
 		return param, nil
+	case index == 0 && !isContextType(files, expr):
+		return methodParameter{}, errors.New("must be context.Context")
 	case index == 0:
 		return methodParameter{kind: methodContextParameter}, nil
 	}
@@ -429,24 +431,51 @@ func resolveStreamImport(file *ast.File, packageExpr ast.Expr, use string) error
 	if !ok {
 		return fmt.Errorf("%s must use a package imported from %q", use, streamImportPath)
 	}
+	importPath, ok := importedPath(file, ident.Name)
+	if !ok {
+		return fmt.Errorf("%s package name %q is not imported from %q", use, ident.Name, streamImportPath)
+	}
+	if importPath != streamImportPath {
+		return fmt.Errorf("%s must be imported from %q", use, streamImportPath)
+	}
+	return nil
+}
+
+// importedPath returns the path of the package that file imports as name.
+func importedPath(file *ast.File, name string) (string, bool) {
 	for _, spec := range file.Imports {
 		importPath, err := strconv.Unquote(spec.Path.Value)
 		if err != nil {
 			continue
 		}
-		name := path.Base(importPath)
+		local := path.Base(importPath)
 		if spec.Name != nil {
-			name = spec.Name.Name
+			local = spec.Name.Name
 		}
-		if name != ident.Name {
-			continue
+		if local == name {
+			return importPath, true
 		}
-		if importPath != streamImportPath {
-			return fmt.Errorf("%s must be imported from %q", use, streamImportPath)
-		}
-		return nil
 	}
-	return fmt.Errorf("%s package name %q is not imported from %q", use, ident.Name, streamImportPath)
+	return "", false
+}
+
+// isContextType reports whether expr names context.Context under any import
+// name.
+func isContextType(files []*ast.File, expr ast.Expr) bool {
+	selector, ok := expr.(*ast.SelectorExpr)
+	if !ok || selector.Sel.Name != "Context" {
+		return false
+	}
+	ident, ok := selector.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	file := fileForExpr(files, expr)
+	if file == nil {
+		return false
+	}
+	importPath, ok := importedPath(file, ident.Name)
+	return ok && importPath == "context"
 }
 
 func streamMessageArgument(expr ast.Expr) (string, error) {

@@ -22,7 +22,12 @@ const (
 // proto-level shape of the service, not the handwritten Go interface: a contract
 // method returning a bare error returns an empty response message here.
 type ExtensionServer interface {
+	// Describe returns the extension's declaration.
 	Describe(context.Context, *DescribeRequest) (*DescribeResponse, error)
+	// Initialize runs the extension's Init. The daemon calls it after connecting
+	// every extension, in dependency order, so that by the time an extension
+	// initializes its dependencies are already initialized and reachable over the
+	// callback channel. An Init error is returned as the RPC status.
 	Initialize(context.Context, *InitializeRequest) (*InitializeResponse, error)
 }
 
@@ -69,7 +74,12 @@ func handleInitialize(srv any, ctx context.Context, dec func(any) error, interce
 // ExtensionClient calls the contract's raw gRPC service. It is exported so a client
 // outside the framework can reach the service with a plain gRPC client.
 type ExtensionClient interface {
+	// Describe returns the extension's declaration.
 	Describe(ctx context.Context, in *DescribeRequest, opts ...grpc.CallOption) (*DescribeResponse, error)
+	// Initialize runs the extension's Init. The daemon calls it after connecting
+	// every extension, in dependency order, so that by the time an extension
+	// initializes its dependencies are already initialized and reachable over the
+	// callback channel. An Init error is returned as the RPC status.
 	Initialize(ctx context.Context, in *InitializeRequest, opts ...grpc.CallOption) (*InitializeResponse, error)
 }
 

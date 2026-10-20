@@ -1,0 +1,127 @@
+// SPDX-FileCopyrightText: Copyright The Moby Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package contract_test
+
+import (
+	"context"
+	"io"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"testing/synctest"
+
+	contract "__CONTRACT_IMPORT__"
+	protogen "__PROTOGEN_IMPORT__"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"gotest.tools/v3/assert"
+)
+
+type transportSource struct {
+	reads atomic.Int32
+}
+
+func (s *transportSource) Recv() (*contract.Chunk, error) {
+	s.reads.Add(1)
+	return &contract.Chunk{Value: 1}, nil
+}
+
+type transportStream struct {
+	ctx         context.Context
+	entered     chan struct{}
+	release     <-chan struct{}
+	finalErr    error
+	enteredOnce sync.Once
+}
+
+func (s *transportStream) Header() (metadata.MD, error) {
+	return nil, nil
+}
+
+func (s *transportStream) Trailer() metadata.MD {
+	return nil
+}
+
+func (s *transportStream) CloseSend() error {
+	return nil
+}
+
+func (s *transportStream) Context() context.Context {
+	return s.ctx
+}
+
+func (s *transportStream) SendMsg(any) error {
+	s.enteredOnce.Do(func() { close(s.entered) })
+	<-s.release
+	return io.EOF
+}
+
+func (s *transportStream) RecvMsg(any) error {
+	return s.finalErr
+}
+
+type transportConn struct {
+	stream *transportStream
+}
+
+func (c *transportConn) Invoke(context.Context, string, any, any, ...grpc.CallOption) error {
+	return status.Error(codes.Unimplemented, "unexpected unary RPC")
+}
+
+func (c *transportConn) NewStream(ctx context.Context, _ *grpc.StreamDesc, _ string, _ ...grpc.CallOption) (grpc.ClientStream, error) {
+	c.stream.ctx = ctx
+	return c.stream, nil
+}
+
+func TestClientStreamingTransportBoundary(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		parent, cancelParent := context.WithCancel(context.Background())
+		t.Cleanup(cancelParent)
+
+		release := newRelease()
+		finalErr := detailError(codes.PermissionDenied, "transport final status", "TRANSPORT_FINAL")
+		stream := &transportStream{
+			entered:  make(chan struct{}),
+			release:  release.ch,
+			finalErr: finalErr,
+		}
+		conn := &transportConn{stream: stream}
+		client := protogen.NewClient(conn)
+		source := &transportSource{}
+		result := make(chan uploadResult, 1)
+		done := make(chan struct{})
+		go func() {
+			reply, err := client.Upload(parent, source)
+			result <- uploadResult{reply: reply, err: err}
+			close(done)
+		}()
+		t.Cleanup(func() {
+			release.Close()
+			<-done
+		})
+
+		<-stream.entered
+		synctest.Wait()
+		assert.Equal(t, source.reads.Load(), int32(1))
+		select {
+		case <-done:
+			t.Fatal("Upload completed while SendMsg was blocked")
+		default:
+		}
+
+		release.Close()
+		got := <-result
+		assert.Assert(t, got.reply == nil)
+		assertDetail(t, got.err, codes.PermissionDenied, "transport final status", "TRANSPORT_FINAL")
+		assert.Assert(t, proto.Equal(status.Convert(got.err).Proto(), status.Convert(finalErr).Proto()))
+		assert.Equal(t, source.reads.Load(), int32(1))
+		assert.Equal(t, stream.ctx.Err(), context.Canceled)
+		assert.NilError(t, parent.Err())
+	})
+}

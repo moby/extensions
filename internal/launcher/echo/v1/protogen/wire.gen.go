@@ -24,6 +24,7 @@ const (
 // proto-level shape of the point, not the point's Go interface: a contract
 // method returning a bare error returns an empty response message here.
 type EchoServer interface {
+	// Echo returns the request message or an error when it is empty.
 	Echo(context.Context, *EchoRequest) (*EchoResponse, error)
 }
 
@@ -57,6 +58,7 @@ func handleEcho(srv any, ctx context.Context, dec func(any) error, interceptor g
 // outside the framework - one calling a service an extension publishes on the
 // API socket - can reach it with a plain gRPC client.
 type EchoClient interface {
+	// Echo returns the request message or an error when it is empty.
 	Echo(ctx context.Context, in *EchoRequest, opts ...grpc.CallOption) (*EchoResponse, error)
 }
 

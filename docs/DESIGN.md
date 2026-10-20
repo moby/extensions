@@ -229,6 +229,56 @@ The Go interface and message structs are the source of truth.
 `mobyextgen` generates the proto, protobuf message code, gRPC service, client and server points, adapters, and conversions without `protoc`, plugins, or other `PATH` tools.
 In-process providers implement Go directly; out-of-process providers use gRPC.
 
+The generator supports three method kinds: unary, server-streaming, and client-streaming.
+A unary method has the shape `M(context.Context, *Request) (*Reply, error)`.
+The generator also accepts the legacy unary shape `M(context.Context, *Request) error`.
+A server-streaming method has the shape `M(context.Context, *Request, stream.Sender[Chunk]) error`.
+A client-streaming method has the shape `M(context.Context, stream.Receiver[Chunk]) (*Reply, error)`.
+The generator rejects bidirectional streams and all other stream signatures.
+A stream message type must be a local struct type that is not generic.
+
+### Why not channels?
+
+A Go channel carries values and a close signal.
+A channel does not show receive errors, send errors, or the final RPC status.
+A channel contract must define rules for these results.
+It must also define rules for cancellation, buffers, message ownership, and which side closes the channel.
+An adapter between an asynchronous channel and an RPC can need forwarding goroutines and careful cleanup.
+The generator can support channels, but channels are not the standard contract.
+If channels were the standard contract, each streaming method would include Go-specific concurrency rules.
+
+### Why not iterators?
+
+Iterators are a possible alternative for RPC adapters.
+With iterators, a consumer can read values in sequence and stop early without forwarding goroutines.
+But an `iter.Seq2[*T, error]` contract must still define rules for errors, cancellation, message ownership, and method completion.
+The stream interfaces give the generator a small and explicit contract to send and receive messages.
+This contract has a shape similar to the Go I/O interfaces.
+`All` and `Copy` give the convenience of iterators, but iterator signatures do not become part of the protocol model.
+The cost is two framework interfaces in addition to the standard library types.
+
+### What method scope provides
+
+The enclosing method stays active until the stream is complete.
+The return value of the method sets the final success or failure.
+Callbacks run synchronously.
+Thus, when a transport send blocks, the adapter stops reading from the source.
+The adapter does this without a background callback pump or an unlimited buffer.
+A normal input EOF closes a client stream, and the adapter then waits for the final reply of the provider.
+This EOF alone does not show that the method is successful.
+If the provider stops a client stream early, the adapter sees the final status only when the source returns from `Recv`.
+Thus, a source that can block must stop when the context of the caller is canceled.
+A normal server-streaming EOF alone does not show success.
+The final `OK` status of the provider shows success.
+Adapters reject a nil stream message from the caller with `InvalidArgument`.
+Adapters reject a nil stream message from a provider with `Internal`.
+
+Generated adapters return provider errors without changes.
+gRPC converts these errors at the server boundary.
+Explicit status errors keep their details.
+Context cancellation errors and deadline errors become `Canceled` and `DeadlineExceeded`, also when they are wrapped.
+All other errors become `Unknown`.
+
 Messages use proto3.
 Supported fields are scalar values, `string`, `[]byte`, repeated scalars such as `[]string`, string-keyed scalar maps such as `map[string]string`, pointer nested messages such as `*Other`, and repeated nested messages such as `[]Other`.
 A single nested message must be a pointer; value nested messages are rejected.

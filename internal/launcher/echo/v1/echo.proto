@@ -9,7 +9,9 @@ package moby.extensions.internal.launcher.echo.v1;
 
 option go_package = "github.com/moby/extensions/internal/launcher/echo/v1/protogen";
 
+// Echo is the provider interface for the echo test point.
 service Echo {
+  // Echo returns the request message or an error when it is empty.
   rpc Echo(EchoRequest) returns (EchoResponse);
 }
 

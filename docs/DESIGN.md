@@ -311,7 +311,7 @@ permission, or security boundary.
   Group-writable binaries are **not** refused; only the world-writable (`o+w`) bit is checked.
   An untrusted group could therefore rewrite a group-writable binary and gain daemon code execution.
   Keep the directory and binaries writable only by root or the daemon user, and do not grant their group to untrusted users.
-- Symlink targets are checked as ordinary files.
+- Only regular files are launched; symlinks and other special files are skipped with a warning.
   Where ownership cannot be determined from file metadata, notably on Windows, the owner check is not enforced; ACL and group policy remain the operator's responsibility.
 - One accepted extension that cannot launch, describe, initialize, or coexist with the set fails daemon startup.
   Because every configured directory is scanned at Host construction, a broken or incompatible binary there blocks startup until removed or its directory is no longer configured.

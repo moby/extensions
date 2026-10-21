@@ -22,10 +22,10 @@ import (
 // A missing directory yields no binaries.
 //
 // Discovery is a root-code-execution boundary.
-// World-writable entries, entries owned by an untrusted user, and files without
-// valid extension ids are skipped.
-// Other trust decisions, including group policy and symlinks, belong to the
-// operator.
+// Only regular files are launched.
+// Symlinks and other special files, world-writable entries, entries owned by an
+// untrusted user, and files without valid extension ids are skipped.
+// Other trust decisions, including group policy, belong to the operator.
 func Binaries(ctx context.Context, dir string) ([]string, error) {
 	entries, err := extensionEntries(ctx, dir)
 	if err != nil || entries == nil {
@@ -36,14 +36,17 @@ func Binaries(ctx context.Context, dir string) ([]string, error) {
 		if entry.IsDir() {
 			continue
 		}
+
+		path := filepath.Join(dir, entry.Name())
+
 		info, err := entry.Info()
 		if err != nil {
-			return nil, fmt.Errorf("stat extension %q: %w", filepath.Join(dir, entry.Name()), err)
+			return nil, fmt.Errorf("stat extension %q: %w", path, err)
 		}
+
 		if !isExecutable(info) {
 			continue
 		}
-		path := filepath.Join(dir, entry.Name())
 		// The file name is the extension id. Validate it before launching so a
 		// shared directory cannot execute arbitrary helper binaries.
 		name := extensionName(entry.Name())
@@ -51,6 +54,14 @@ func Binaries(ctx context.Context, dir string) ([]string, error) {
 			log.G(ctx).WithError(err).Warnf("extensions: skipping %q: not a valid extension binary name", path)
 			continue
 		}
+		// A symlink target can live in a directory these checks do not cover,
+		// whose owner could replace the executed file. Other special files cannot
+		// be executed and would only fail the launch.
+		if !info.Mode().IsRegular() {
+			log.G(ctx).Warnf("extensions: refusing to run extension %q: not a regular file", path)
+			continue
+		}
+
 		if worldWritable(info) {
 			log.G(ctx).Warnf("extensions: refusing to run world-writable extension binary %q", path)
 			continue

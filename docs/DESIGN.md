@@ -304,14 +304,14 @@ permission, or security boundary.
 
 - Directories supplied through `host.WithDirs` are trusted; the framework has no default discovery directory.
   Treat each as a root-owned program directory: only package managers or operators should install files there, and unprivileged users must not be able to write to it.
-- A world-writable directory or binary is skipped with a warning.
-  A binary or directory owned by anyone other than root or the daemon user is also skipped because its owner could rewrite daemon-executed code.
+- A world-writable directory or binary fails startup.
+  So does a binary or directory owned by anyone other than root or the daemon user, because its owner could rewrite daemon-executed code.
   Only executable files with valid extension-id names are launched; stray tools and build leftovers are not executed.
 - These checks are backstops, not the complete trust model.
   Group-writable binaries are **not** refused; only the world-writable (`o+w`) bit is checked.
   An untrusted group could therefore rewrite a group-writable binary and gain daemon code execution.
   Keep the directory and binaries writable only by root or the daemon user, and do not grant their group to untrusted users.
-- Only regular files are launched; symlinks and other special files are skipped with a warning.
+- Symlinks and other non-regular files fail startup.
   Where ownership cannot be determined from file metadata, notably on Windows, the owner check is not enforced; ACL and group policy remain the operator's responsibility.
 - One accepted extension that cannot launch, describe, initialize, or coexist with the set fails daemon startup.
   Because every configured directory is scanned at Host construction, a broken or incompatible binary there blocks startup until removed or its directory is no longer configured.

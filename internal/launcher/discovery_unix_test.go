@@ -14,22 +14,32 @@ import (
 	"gotest.tools/v3/assert"
 )
 
-// TestBinariesRefusesNonRegularFiles verifies that only regular files are
-// launched, even when a symlink's target would pass every other check.
+// TestBinariesRefusesNonRegularFiles verifies that an extension binary that is
+// not a regular file fails discovery, even when a symlink's target would pass
+// every other check.
 func TestBinariesRefusesNonRegularFiles(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "target")
 	assert.NilError(t, os.WriteFile(target, []byte("x"), 0o755))
 
-	dir := t.TempDir()
-	good := filepath.Join(dir, "org.example.good.v1")
-	assert.NilError(t, os.WriteFile(good, []byte("x"), 0o755))
-	assert.NilError(t, os.Symlink(target, filepath.Join(dir, "org.example.link.v1")))
-	fifo := filepath.Join(dir, "org.example.fifo.v1")
-	assert.NilError(t, syscall.Mkfifo(fifo, 0o755))
-	// Mkfifo applies the umask; make sure the pipe looks executable.
-	assert.NilError(t, os.Chmod(fifo, 0o755))
+	for _, tc := range []struct {
+		name   string
+		create func(path string) error
+	}{
+		{name: "symlink", create: func(path string) error { return os.Symlink(target, path) }},
+		{name: "fifo", create: func(path string) error {
+			if err := syscall.Mkfifo(path, 0o755); err != nil {
+				return err
+			}
+			// Mkfifo applies the umask; make sure the pipe looks executable.
+			return os.Chmod(path, 0o755)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bin := filepath.Join(t.TempDir(), "org.example.special.v1")
+			assert.NilError(t, tc.create(bin))
 
-	bins, err := Binaries(t.Context(), dir)
-	assert.NilError(t, err)
-	assert.DeepEqual(t, bins, []string{good})
+			_, err := Binaries(t.Context(), filepath.Dir(bin))
+			assert.Error(t, err, `extension binary "`+bin+`" is not a regular file`)
+		})
+	}
 }

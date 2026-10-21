@@ -165,31 +165,29 @@ func TestBinaries(t *testing.T) {
 	assert.Check(t, is.Len(missing, 0))
 }
 
-// TestBinariesRefusesWorldWritable verifies the root-exec safety filter.
+// TestBinariesRefusesWorldWritable verifies that world-writable binaries and
+// dirs fail discovery rather than being silently dropped.
 func TestBinariesRefusesWorldWritable(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("world-writable bit is not meaningful on Windows")
 	}
 	dir := t.TempDir()
-	good := filepath.Join(dir, "org.example.good.v1")
 	bad := filepath.Join(dir, "org.example.bad.v1")
-	assert.NilError(t, os.WriteFile(good, []byte("x"), 0o755))
 	assert.NilError(t, os.WriteFile(bad, []byte("x"), 0o755))
 	assert.NilError(t, os.Chmod(bad, 0o757)) // o+w
 
-	bins, err := Binaries(t.Context(), dir)
-	assert.NilError(t, err)
-	assert.DeepEqual(t, bins, []string{good})
+	_, err := Binaries(t.Context(), dir)
+	assert.Error(t, err, `extension binary "`+bad+`" is world-writable`)
 
 	wwDir := t.TempDir()
 	assert.NilError(t, os.WriteFile(filepath.Join(wwDir, "org.example.x.v1"), []byte("x"), 0o755))
 	assert.NilError(t, os.Chmod(wwDir, 0o777))
-	bins, err = Binaries(t.Context(), wwDir)
-	assert.NilError(t, err)
-	assert.Check(t, is.Len(bins, 0))
+	_, err = Binaries(t.Context(), wwDir)
+	assert.Error(t, err, `extension dir "`+wwDir+`" is world-writable`)
 }
 
-// TestBinariesRefusesUntrustedOwner verifies the ownership filter.
+// TestBinariesRefusesUntrustedOwner verifies that binaries and dirs owned by an
+// untrusted user fail discovery.
 func TestBinariesRefusesUntrustedOwner(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("ownership is not enforced on Windows")
@@ -198,15 +196,17 @@ func TestBinariesRefusesUntrustedOwner(t *testing.T) {
 		t.Skip("changing a file's owner requires root")
 	}
 	dir := t.TempDir()
-	good := filepath.Join(dir, "org.example.good.v1")
 	bad := filepath.Join(dir, "org.example.bad.v1")
-	assert.NilError(t, os.WriteFile(good, []byte("x"), 0o755))
 	assert.NilError(t, os.WriteFile(bad, []byte("x"), 0o755))
 	assert.NilError(t, os.Chown(bad, 65534, 65534)) // nobody: not root, not us
 
-	bins, err := Binaries(t.Context(), dir)
-	assert.NilError(t, err)
-	assert.DeepEqual(t, bins, []string{good})
+	_, err := Binaries(t.Context(), dir)
+	assert.Error(t, err, `extension binary "`+bad+`" is owned by untrusted uid 65534`)
+
+	badDir := t.TempDir()
+	assert.NilError(t, os.Chown(badDir, 65534, 65534))
+	_, err = Binaries(t.Context(), badDir)
+	assert.Error(t, err, `extension dir "`+badDir+`" is owned by untrusted uid 65534`)
 }
 
 func TestLaunchOutOfProcess(t *testing.T) {

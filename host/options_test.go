@@ -9,6 +9,8 @@ import (
 
 	"github.com/moby/extensions"
 	"github.com/moby/extensions/host"
+	"github.com/moby/extensions/serverpoint"
+	"google.golang.org/grpc"
 	"gotest.tools/v3/assert"
 )
 
@@ -30,6 +32,18 @@ func TestNewRejectsNilOption(t *testing.T) {
 		t.Fatal("host.New returned nil error for a nil option")
 	}
 	assert.Equal(t, err.Error(), "nil host option")
+}
+
+func TestNewRejectsDependencyProvidersWithoutRuntimeDir(t *testing.T) {
+	t.Parallel()
+
+	dep := serverpoint.Registration{
+		Point:    "org.example.dependency.v1",
+		Register: func(grpc.ServiceRegistrar, any) {},
+	}
+	h, err := host.New(t.Context(), host.WithDependencyProviders(dep))
+	assert.Assert(t, h == nil)
+	assert.Error(t, err, "extension runtime dir is required for dependency providers")
 }
 
 func TestRepeatedExtensionOptionsComposeAndCopyInput(t *testing.T) {

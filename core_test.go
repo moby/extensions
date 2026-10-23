@@ -104,7 +104,7 @@ func TestValidateExtensionID(t *testing.T) {
 		"org.example.a b.v1",         // whitespace
 		"org..example.v1",            // empty segment
 		"org.example.under_score.v1", // underscore not allowed in extension ids
-		"org.example.v1.v2",          // name ends in a version
+		"org.example.v1.v2",          // name ends in a version, so the key org.example.v1 would be ambiguous
 	}
 	for _, id := range invalid {
 		if err := ValidateExtensionID(id); err == nil {

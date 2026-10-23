@@ -41,8 +41,9 @@ These names are distinct:
   The id is the binary name, configuration key, dependency name, and named-lookup selector, not an interface name.
   Registration rejects invalid ids.
   Its version is a namespace element, not a semantic version, and is independent of point versions.
-  Thus `com.foo.v1` and `com.foo.v2` are different extensions, binaries, and configurations that can coexist.
-  The name before the version must not end in a version itself, so `com.foo.v1.v2` is invalid.
+  Thus `com.foo.v1` and `com.foo.v2` are different extensions and binaries that can coexist.
+  Their configuration is separate unless the application supplies a `com.foo` key, which applies to every version without an entry keyed by its full id.
+  The name before the version must not end in a version itself, so `com.foo.v1.v2` is invalid and a key is never both an id and a name.
 - **Extension identity** is the logical extension id plus the host-attested
   origin `builtin` or `executable`.
   Registration rejects an empty or unknown origin, an invalid identity id, or
@@ -206,7 +207,7 @@ The binary name is its extension id (`<id>.exe` on Windows), and the daemon laun
 Startup proceeds as follows:
 
 1. The daemon writes JSON to stdin with `endpoint`, `protocolVersion`, `config`, and, when dependencies are offered, `callbackEndpoint`.
-   The current protocol version is `1`; `config` is the entry supplied through `host.WithExtensionConfig` for the id.
+   The current protocol version is `1`; `config` is the entry that `extensions.LookupConfig` selects for the id from `host.WithExtensionConfig`.
 2. The SDK listens on the supplied Unix socket, then writes exactly `ready\n` to stdout.
    Stdout is reserved for this line: any earlier output corrupts the handshake and fails launch.
    The daemon also drains later stdout so it cannot block the process.

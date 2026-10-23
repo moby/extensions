@@ -114,7 +114,7 @@ func ValidatePointID(id PointID) error {
 
 // cutExtensionVersion splits id into its name and its mandatory ".vN" version.
 // The version is a namespace element, not a semantic version: changing
-// com.foo.v1 to com.foo.v2 creates a new extension, binary, and configuration.
+// com.foo.v1 to com.foo.v2 creates a new extension and binary.
 func cutExtensionVersion(id ExtensionID) (name string, ok bool) {
 	i := strings.LastIndexByte(string(id), '.')
 	if i < 0 || !isExtensionVersion(string(id[i+1:])) {
@@ -143,8 +143,8 @@ func isExtensionVersion(segment string) bool {
 // validExtensionName reports whether name is a lowercase reverse-DNS extension
 // name: an extension id without its version.
 // The restricted characters also make the id safe as a config key and filename.
-// A name must not end in a version itself, so a name is never also an extension
-// id.
+// A name must not end in a version itself, so a configuration key is either an
+// extension id or an extension name, never both.
 func validExtensionName(name string) bool {
 	segments := strings.Split(name, ".")
 	if len(segments) < 2 || isExtensionVersion(segments[len(segments)-1]) {
@@ -355,10 +355,6 @@ func RegisterAll(registrar Registrar, exts ...Extension) error {
 	}
 	return nil
 }
-
-// Config is parsed per-extension configuration delivered by id to Init or the
-// out-of-process startup handshake.
-type Config = map[string]any
 
 // Extension is a host-managed extension declaration.
 type Extension interface {

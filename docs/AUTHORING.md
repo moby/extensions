@@ -513,7 +513,7 @@ See the [lifecycle limitations](./DESIGN.md#resolution-ordering-and-lifecycle).
 - [ ] Offer selected implemented Points with `servicev0.Offer`.
 - [ ] Add Host `WithProviderPolicy` and in-process `WithPointServers` wiring as needed.
 - [ ] Keep handshake output on stdout and logs on stderr.
-- [ ] Install one correctly named, non-world-writable binary in the trusted extension directory.
+- [ ] Install one correctly named, non-world-writable binary (not a symlink) in the trusted extension directory.
 
 ## Quick reference
 

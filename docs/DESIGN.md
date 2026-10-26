@@ -10,26 +10,21 @@ Docker configuration files, CLI flags, and engine integration are outside this m
 
 ## Contract and startup
 
-An extension declaration contains its logical id, points, dependencies,
-conflicts, and optional `Init` and `Shutdown` functions.
+An extension declaration contains its logical id, points, dependencies, conflicts, and optional `Init` and `Shutdown` functions.
 The host checks it before calling a provider or wiring an engine flow.
-The declared id is not the complete runtime identity: the host validates it
-against host authority and combines it with a host-attested origin.
+The declared id is not the complete runtime identity: the host validates it against host authority and combines it with a host-attested origin.
 
 - An in-process declaration is a value read by the host.
 - For a separate binary, the daemon must launch the process before obtaining its declaration through the startup `Describe` handshake.
   A rejected declaration cannot provide a point or participate in an engine flow.
-- The host assigns origin `builtin` to configured in-process extensions and
-  `executable` to binaries it launches.
-  An external process cannot declare or otherwise supply its origin; origin is
-  absent from the process protocol.
+- The host assigns origin `builtin` to configured in-process extensions and `executable` to binaries it launches.
+  An external process cannot declare or otherwise supply its origin; origin is absent from the process protocol.
 - Configuration is keyed by extension id.
   In-process extensions receive it during `Init`; separate binaries receive it in the startup handshake.
   The id is also the binary name, so the daemon can select configuration before launch.
 
 Registration is explicit: importing a package does nothing, and there is no package-level `func init()` registry.
-The host chooses the active set, which is fixed for that host and daemon
-lifetime.
+The host chooses the active set, which is fixed for that host and daemon lifetime.
 
 ## Identifiers
 
@@ -42,10 +37,8 @@ These names are distinct:
   Registration rejects invalid ids.
   Its version is a namespace element, not a semantic version, and is independent of point versions.
   Thus `com.foo.v1` and `com.foo.v2` are different extensions, binaries, and configurations that can coexist.
-- **Extension identity** is the logical extension id plus the host-attested
-  origin `builtin` or `executable`.
-  Registration rejects an empty or unknown origin, an invalid identity id, or
-  an identity id that differs from the declaration id.
+- **Extension identity** is the logical extension id plus the host-attested origin `builtin` or `executable`.
+  Registration rejects an empty or unknown origin, an invalid identity id, or an identity id that differs from the declaration id.
   Providers and Host policy receive this validated identity.
 - **Point id** identifies a versioned interface contract, for example `com.docker.compose.api.v1`.
   It is a lowercase, dot-separated, reverse-DNS-style name ending in `vN`; segments may contain digits, hyphens, and underscores.
@@ -57,10 +50,9 @@ These names are distinct:
   Socket routing uses the full service name, never the bare point id.
 - **CLI / API route** is a separate client-facing name, such as `docker compose up` or a REST path; the framework does not generate it.
 
-Publishing a point id means publishing the generated gRPC service in its proto
-package. Socket routing takes the full service name. `servicev0.Point` carries
-the extension's offers, while policy on `servicev0.Point.ID()` makes the final
-publication decision.
+Publishing a point id means publishing the generated gRPC service in its proto package.
+Socket routing takes the full service name.
+`servicev0.Point` carries the extension's offers, while policy on `servicev0.Point.ID()` makes the final publication decision.
 
 ## Resolution, ordering, and lifecycle
 
@@ -78,8 +70,7 @@ Providers are selected when a point is used:
 Its generated `ClientPoint` carries that fact, so the host rejects two executable providers for the point at startup.
 For a single-provider point, a built-in is used only when no executable extension provides the point; an executable provider replaces it without a disable declaration.
 Runtime fallback and failure behavior belongs to each point's call helper and contract.
-Fan-out accessors include built-in and executable providers and expose each
-provider's identity; by-id lookup always honors the named extension id.
+Fan-out accessors include built-in and executable providers and expose each provider's identity; by-id lookup always honors the named extension id.
 
 Sole ownership is not a general provider setting.
 A fan-out point accepts any number of providers, and a consumer may request one at use time.
@@ -99,50 +90,38 @@ Missing required dependencies and cycles fail fast; optional dependencies may be
 An extension dependency adds naming and ordering, not another callable surface: all calls still use points.
 During in-process `Init`, the provider is called directly.
 During out-of-process `Init`, the extension calls a daemon callback channel that routes to the provider.
-The callback currently serves one effective provider per dependency point;
-cross-process `All` and by-id selection are deferred.
+The callback currently serves one effective provider per dependency point; cross-process `All` and by-id selection are deferred.
 
 The lifecycle is register, resolve, initialize, run, and shut down.
-Normal shutdown runs semantic extension shutdown in reverse dependency order,
-then closes launched extension processes and callback resources.
-It tears down only initialized extensions semantically, while still releasing
-all acquired process resources.
-A launch, policy, registration, or initialization failure unwinds started
-processes and initialized extensions; loading is all-or-nothing, not degraded.
+Normal shutdown runs semantic extension shutdown in reverse dependency order, then closes launched extension processes and callback resources.
+It tears down only initialized extensions semantically, while still releasing all acquired process resources.
+A launch, policy, registration, or initialization failure unwinds started processes and initialized extensions; loading is all-or-nothing, not degraded.
 Errors are attributed to the extension that produced them.
 
-There is no watchdog, process restart, reconnect, or adoption of extension
-processes from an earlier host.
+There is no watchdog, process restart, reconnect, or adoption of extension processes from an earlier host.
 A daemon restart constructs a new Host and a new fixed extension set.
 The framework provides no integration with Moby live restore to retain extension processes, callback sockets, or in-memory extension state.
-Until a separate extension lifecycle exists, an extension must not own runtime
-state required by containers that are expected to survive their host daemon.
-The generic Host makes no universal guarantee that an abrupt host crash kills
-every child process; OS-specific parent-lifetime mechanisms may provide
-additional cleanup.
+Until a separate extension lifecycle exists, an extension must not own runtime state required by containers that are expected to survive their host daemon.
+The generic Host makes no universal guarantee that an abrupt host crash kills every child process; OS-specific parent-lifetime mechanisms may provide additional cleanup.
 
 ## Socket publication
 
-An extension is reachable through daemon-internal point calls, or through the
-generated gRPC service of an ordinary Point that it explicitly publishes.
+An extension is reachable through daemon-internal point calls, or through the generated gRPC service of an ordinary Point that it explicitly publishes.
 Publication does not require the daemon to import the extension's proto.
 Arbitrary raw gRPC publication is not supported.
 
 ### Generated Point publication
 
-The source is an ordinary `extensions.DefinePoint` or
-`extensions.DefineSinglePoint` with the provider interface and message
-structs. `mobyextgen` always infers `<PointID>.<InterfaceName>`.
+The source is an ordinary `extensions.DefinePoint` or `extensions.DefineSinglePoint` with the provider interface and message structs.
+`mobyextgen` always infers `<PointID>.<InterfaceName>`.
 
-The generated Point package exports `ServerPoint`, `ClientPoint`, and
-handwritten-interface `NewClient(conn)`:
+The generated Point package exports `ServerPoint`, `ClientPoint`, and handwritten-interface `NewClient(conn)`:
 
 - `ServerPoint` serves an ordinary point to an SDK server or a dependency callback.
 - `ClientPoint` builds the host-side provider adapter for a launched ordinary point.
 - `NewClient(conn)` returns the handwritten Go interface over a gRPC connection.
 
-The extension implements ordinary Points and separately offers a selected
-subset as metadata:
+The extension implements ordinary Points and separately offers a selected subset as metadata:
 
 ```go
 Providers: []extensions.Provider{
@@ -151,49 +130,34 @@ Providers: []extensions.Provider{
 }
 ```
 
-`servicev0.Offer` carries no transport registration and grants no publication
-authority. The Host applies `WithProviderPolicy` to `servicev0.Point.ID()` and
-drops all offers when the policy is nil.
-The same policy admits providers wired for internal Host use by ordinary Point
-ID; a nil policy preserves their registration.
-An `Allow` decision keeps the provider use, `Drop` omits it, and `Reject` fails
-Host construction while preserving its error cause.
-The zero result rejects as invalid or unspecified, and a typed nil
-`PointPolicyFunc` rejects with a generic cause.
-An offered-only process Point without Host client wiring is governed only by
-the servicev0 policy decision.
-The servicev0 marker is exempt from provider admission and controls publication
-of the extension's offered Points.
+`servicev0.Offer` carries no transport registration and grants no publication authority.
+The Host applies `WithProviderPolicy` to `servicev0.Point.ID()` and drops all offers when the policy is nil.
+The same policy admits providers wired for internal Host use by ordinary Point ID; a nil policy preserves their registration.
+An `Allow` decision keeps the provider use, `Drop` omits it, and `Reject` fails Host construction while preserving its error cause.
+The zero result rejects as invalid or unspecified, and a typed nil `PointPolicyFunc` rejects with a generic cause.
+An offered-only process Point without Host client wiring is governed only by the servicev0 policy decision.
+The servicev0 marker is exempt from provider admission and controls publication of the extension's offered Points.
 
-An out-of-process extension passes every ordinary provider's generated
-`ServerPoint` to `sdk.Main` or `Server.Register`. The SDK records service names
-under the ordinary Point and serializes offered Point IDs separately. The Host
-may omit `ClientPoint` wiring for an offered-only Point; add it when the daemon
-also calls that Point internally.
+An out-of-process extension passes every ordinary provider's generated `ServerPoint` to `sdk.Main` or `Server.Register`.
+The SDK records service names under the ordinary Point and serializes offered Point IDs separately.
+The Host may omit `ClientPoint` wiring for an offered-only Point; add it when the daemon also calls that Point internally.
 
-For in-process offers, Host composition supplies generated adapters through
-`WithPointServers`. The Host resolves the implementation from the same extension,
-applies policy, and preflights daemon-reserved, process, and in-process service
-name collisions before registration.
+For in-process offers, Host composition supplies generated adapters through `WithPointServers`.
+The Host resolves the implementation from the same extension, applies policy, and preflights daemon-reserved, process, and in-process service name collisions before registration.
 
-External callers use the generated client directly over an existing host or
-proxy connection:
+External callers use the generated client directly over an existing host or proxy connection:
 
 ```go
 client := greeterpb.NewClient(hostConn)
 reply, err := client.Greet(ctx, &greeterv0.HelloRequest{Name: "world"})
 ```
 
-For an out-of-process extension, the SDK registers generated services on the
-extension server and reports their fully qualified names. The daemon proxies
-matching calls by name and forwards the raw gRPC stream, including metadata and
-status.
+For an out-of-process extension, the SDK registers generated services on the extension server and reports their fully qualified names.
+The daemon proxies matching calls by name and forwards the raw gRPC stream, including metadata and status.
 
 Generated service names are captured from generated registration, not listed manually.
-The extension must provide the shared publication point before publishing its
-service inventory. A name cannot collide with another extension or a service
-already served by the daemon; collision fails startup rather than shadowing the
-existing service.
+The extension must provide the shared publication point before publishing its service inventory.
+A name cannot collide with another extension or a service already served by the daemon; collision fails startup rather than shadowing the existing service.
 
 The embedding application chooses the gRPC endpoint used for publication; the framework does not create a Docker API endpoint.
 An exposed service must enforce any access control it needs.
@@ -216,8 +180,7 @@ Startup proceeds as follows:
    The SDK runs the extension's `Init` then and its `Shutdown` during shutdown.
    A dependency callback socket is available at initialization when the host offered the declared dependency points.
    The SDK connects lazily, and `Depends` supplies generated client adapters.
-   A client resolved from that callback may be retained for normal operation,
-   but the SDK closes the callback connection before invoking `Shutdown`.
+   A client resolved from that callback may be retained for normal operation, but the SDK closes the callback connection before invoking `Shutdown`.
 
 Point calls use generated gRPC server and client wiring.
 The generated client adapter presents the same Go interface to the host.
@@ -290,17 +253,14 @@ Optional scalars, `oneof`, enums, and well-known types such as timestamp and dur
 Use a Unix `int64` time, documented string enum-like values, or a `bytes` / JSON payload instead.
 There is no typed error schema: Go `error` crosses gRPC as a status, and each point documents its meaning, such as a veto.
 
-The current protocol may renumber, remove, or change fields without migration
-handling. Once a contract is declared stable, field numbers and types become
-permanent and breaking changes require a new `.vN`.
+The current protocol may renumber, remove, or change fields without migration handling.
+Once a contract is declared stable, field numbers and types become permanent and breaking changes require a new `.vN`.
 
 ## Discovery security
 
 Discovery is a root-code-execution boundary.
-The daemon scans the extensions directory and launches every accepted
-executable, often as root; each accepted binary remains trusted host code.
-Its host-attested identity is attribution for lookup and policy, not a sandbox,
-permission, or security boundary.
+The daemon scans the extensions directory and launches every accepted executable, often as root; each accepted binary remains trusted host code.
+Its host-attested identity is attribution for lookup and policy, not a sandbox, permission, or security boundary.
 
 - Directories supplied through `host.WithDirs` are trusted; the framework has no default discovery directory.
   Treat each as a root-owned program directory: only package managers or operators should install files there, and unprivileged users must not be able to write to it.

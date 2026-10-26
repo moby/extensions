@@ -73,9 +73,9 @@ func Greet(ctx context.Context, resolver extensions.Resolver, req *HelloRequest)
 }
 ```
 
-The interface name is the gRPC service-name component. Keep it stable within a
-Point version. If a clearer Go name is useful, add an alias without changing the
-type used by `DefinePoint`:
+The interface name is the gRPC service-name component.
+Keep it stable within a Point version.
+If a clearer Go name is useful, add an alias without changing the type used by `DefinePoint`:
 
 ```go
 type LegacyGreeter interface {
@@ -123,9 +123,8 @@ The detailed rules are [DESIGN.md](./DESIGN.md#resolution-ordering-and-lifecycle
 Supported fields are scalar values, `string`, `[]byte`, repeated scalars such as `[]string`, string-keyed scalar maps, pointer nested messages such as `*Other`, and repeated nested messages such as `[]Other`.
 A single nested message must be a pointer; the generator rejects a value field.
 
-The current framework is experimental and does not preserve compatibility for
-removed fields. For proto3 presence, unsupported types, and wire-shape rules,
-see [DESIGN.md#wire-contract](./DESIGN.md#wire-contract).
+The current framework is experimental and does not preserve compatibility for removed fields.
+For proto3 presence, unsupported types, and wire-shape rules, see [DESIGN.md#wire-contract](./DESIGN.md#wire-contract).
 
 Points the engine offers to extensions use the same interface shape; only caller direction changes.
 
@@ -141,8 +140,7 @@ It is identical for every point; there are no paths to adjust:
 package <name>v0
 ```
 
-`mobyextgen` reads the Go contract at generation time and writes the `.proto`,
-protobuf message code, and `wire.gen.go`.
+`mobyextgen` reads the Go contract at generation time and writes the `.proto`, protobuf message code, and `wire.gen.go`.
 For an ordinary Point, it infers the gRPC service name as `<PointID>.<InterfaceName>`.
 The generated package exports:
 
@@ -156,8 +154,7 @@ The generated adapters make these methods available as protobuf streaming RPCs.
 The generator rejects bidirectional streams and all other stream parameter and result shapes.
 
 The contract package does not import protobuf packages; generated code belongs in `protogen/`.
-The generator derives the import path from `go.mod` and the proto file name
-from the inferred service identity.
+The generator derives the import path from `go.mod` and the proto file name from the inferred service identity.
 
 ### 3. Generate and validate
 
@@ -221,8 +218,8 @@ For example, a naming Point that the daemon calls needs `ClientPoint`, while a j
 
 ### Publishing an ordinary Point
 
-Publication uses the same ordinary Point contract; there is no standalone
-service contract. Implement the Point and separately offer it:
+Publication uses the same ordinary Point contract; there is no standalone service contract.
+Implement the Point and separately offer it:
 
 ```go
 var Extension = extensions.New(extensions.Declaration{
@@ -244,8 +241,8 @@ Providers: []extensions.Provider{
 }
 ```
 
-The Host drops publication by default. Allow an offer only through explicit
-policy:
+The Host drops publication by default.
+Allow an offer only through explicit policy:
 
 ```go
 _, err := host.New(ctx, host.WithProviderPolicy(host.PointPolicyFunc(func(identity extensions.ExtensionIdentity, point extensions.PointID) host.PointPolicyResult {
@@ -280,8 +277,7 @@ For an in-process extension, supply generated adapters at Host composition:
 host.WithPointServers(greeterpb.ServerPoint),
 ```
 
-A separate binary passes every ordinary provider's generated `ServerPoint` to
-the SDK, whether the Point is internal, offered, or both:
+A separate binary passes every ordinary provider's generated `ServerPoint` to the SDK, whether the Point is internal, offered, or both:
 
 ```go
 sdk.Main(extension, sdk.WithServerPoints(greeterpb.ServerPoint))
@@ -294,10 +290,9 @@ client := greeterpb.NewClient(hostConn)
 reply, err := client.Greet(ctx, &greeterv0.HelloRequest{Name: "world"})
 ```
 
-The current backend is gRPC. For a launched extension, the SDK registers the
-generated service, the daemon records its fully qualified name, and the proxy
-forwards the raw gRPC stream, including metadata and status. Arbitrary raw gRPC
-publication is not part of the extension API.
+The current backend is gRPC.
+For a launched extension, the SDK registers the generated service, the daemon records its fully qualified name, and the proxy forwards the raw gRPC stream, including metadata and status.
+Arbitrary raw gRPC publication is not part of the extension API.
 
 ## Writing an extension
 
@@ -342,8 +337,7 @@ The broker initializes dependencies before dependents.
 ### Retain dependencies for later calls
 
 `Init` is where the host supplies the resolver.
-If an extension needs a dependency after initialization, resolve it in `Init` and
-store the typed interface on the same stateful extension object:
+If an extension needs a dependency after initialization, resolve it in `Init` and store the typed interface on the same stateful extension object:
 
 ```go
 type Consumer struct {
@@ -371,10 +365,8 @@ func (c *Consumer) Handle(
 }
 ```
 
-The dependency declaration controls presence and initialization order; it does
-not inject a field automatically.
-Resolve during `Init` so a missing or ambiguous required dependency fails before
-the extension starts serving.
+The dependency declaration controls presence and initialization order; it does not inject a field automatically.
+Resolve during `Init` so a missing or ambiguous required dependency fails before the extension starts serving.
 Store the resolver itself only when lookup must be deferred.
 
 For a fan-out point, store the typed provider list returned by `All`:
@@ -396,17 +388,11 @@ func (c *Consumer) init(
 ```
 
 Use `ByExtension` when the extension must call one named provider.
-For an optional dependency, declare `Point.OptionalDependency()`, check
-`Point.Enabled(resolver)` in `Init`, and leave the stored provider empty when the
-point is absent.
+For an optional dependency, declare `Point.OptionalDependency()`, check `Point.Enabled(resolver)` in `Init`, and leave the stored provider empty when the point is absent.
 
-The same pattern works out of process: the resolved interface may be a generated
-gRPC client and can be stored for normal operation.
-The binary must still call `Server.Depends` for the point, and the host must
-offer its generated `ServerPoint` as described below.
-The current SDK closes the dependency callback connection before it calls the
-extension's `Shutdown` hook, so a retained out-of-process dependency must not be
-used from `Shutdown`.
+The same pattern works out of process: the resolved interface may be a generated gRPC client and can be stored for normal operation.
+The binary must still call `Server.Depends` for the point, and the host must offer its generated `ServerPoint` as described below.
+The current SDK closes the dependency callback connection before it calls the extension's `Shutdown` hook, so a retained out-of-process dependency must not be used from `Shutdown`.
 
 For an out-of-process extension, wire every dependency point it will call:
 
@@ -453,8 +439,7 @@ Keep `h` for point resolution and call `h.Shutdown` when the application exits, 
 
 ### Run out-of-process
 
-Write a `main` that builds an SDK server, registers the extension, and passes a
-generated `ServerPoint` for each Point through `WithServerPoints`:
+Write a `main` that builds an SDK server, registers the extension, and passes a generated `ServerPoint` for each Point through `WithServerPoints`:
 
 ```go
 func main() {

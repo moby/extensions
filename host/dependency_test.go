@@ -72,8 +72,12 @@ func TestOutOfProcessDependency(t *testing.T) {
 		host.WithDependencyProviders(greeterpb.ServerPoint),
 	)
 	assert.NilError(t, err)
-	defer func() { assert.NilError(t, h.Shutdown(context.WithoutCancel(ctx))) }()
 
 	assert.Equal(t, calls.Load(), int32(1),
-		"in-process greeter provider was not called by the out-of-process extension")
+		"in-process greeter provider was not called by the out-of-process extension's Init")
+
+	// The extension only logs Shutdown failures, so check that its call arrived.
+	assert.NilError(t, h.Shutdown(context.WithoutCancel(ctx)))
+	assert.Equal(t, calls.Load(), int32(2),
+		"in-process greeter provider was not called by the out-of-process extension's Shutdown")
 }

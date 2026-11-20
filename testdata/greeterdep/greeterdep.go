@@ -15,8 +15,12 @@ import (
 // ID is the extension id and binary name.
 const ID = "org.mobyproject.example.greeterdep.v1"
 
-// initialize calls the greeter dependency and verifies the reply.
-func initialize(ctx context.Context, _ extensions.Config, r extensions.Resolver) error {
+// resolver keeps the Init resolver for Shutdown; the fixture process serves
+// only this extension.
+var resolver extensions.Resolver
+
+// greet calls the greeter dependency and verifies the reply.
+func greet(ctx context.Context, r extensions.Resolver) error {
 	reply, err := greeterv0.Greet(ctx, r, &greeterv0.HelloRequest{Name: "dep"})
 	if err != nil {
 		return fmt.Errorf("greeterdep: call greeter dependency: %w", err)
@@ -27,9 +31,16 @@ func initialize(ctx context.Context, _ extensions.Config, r extensions.Resolver)
 	return nil
 }
 
-// Extension declares and uses a dependency on the greeter point.
+// Extension declares a dependency on the greeter point and calls it from both
+// Init and Shutdown.
 var Extension = extensions.New(extensions.Declaration{
 	ID:           ID,
 	Dependencies: []extensions.Dependency{greeterv0.Point.Dependency()},
-	Init:         initialize,
+	Init: func(ctx context.Context, _ extensions.Config, r extensions.Resolver) error {
+		resolver = r
+		return greet(ctx, r)
+	},
+	Shutdown: func(ctx context.Context) error {
+		return greet(ctx, resolver)
+	},
 })

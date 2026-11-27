@@ -52,7 +52,7 @@ These names are distinct:
   Socket routing uses the full service name, never the bare point id.
 - **CLI / API route** is a separate client-facing name, such as `docker compose up` or a REST path; the framework does not generate it.
 
-Publishing a point id means publishing the generated gRPC service in its proto package.
+Publishing a point id means publishing the services registered for that point.
 Socket routing takes the full service name.
 `servicev0.Point` carries the extension's offers, while policy on `servicev0.Point.ID()` makes the final publication decision.
 
@@ -156,9 +156,10 @@ reply, err := client.Greet(ctx, &greeterv0.HelloRequest{Name: "world"})
 ```
 
 For an out-of-process extension, the SDK registers generated services on the extension server.
-The daemon routes the offered Point's proto package to the extension with `grpcproxy` and forwards the raw gRPC stream, including metadata and status.
+The daemon uses `Host.OfferedServices` to route the exact gRPC service names reported for each admitted Point.
+This also works for services registered in a proto package other than the Point ID and does not expose unrelated services in the same package.
+`grpcproxy` forwards the raw gRPC stream, including metadata and status.
 
-Generated service names are `<PointID>.<InterfaceName>`, so an offered Point's proto package is its Point ID.
 The extension must provide the shared publication point before publishing its service inventory.
 `grpcproxy.BuildRoutes` rejects a package or service that another backend or a reserved daemon service already occupies; collision fails startup rather than shadowing the existing service.
 

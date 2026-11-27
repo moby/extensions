@@ -38,7 +38,7 @@ func offeredPoints(h *host.Host) map[extensions.ExtensionID][]extensions.PointID
 }
 
 // TestPointSocketExposure verifies an out-of-process published Point is
-// reachable through a proxy that routes its offered Point's package.
+// reachable when its gRPC service lives outside the Point ID's package.
 func TestPointSocketExposure(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and launches a helper binary")
@@ -82,7 +82,7 @@ func TestPointSocketExposure(t *testing.T) {
 
 	offered := offeredPoints(h)
 	assert.DeepEqual(t, offered, map[extensions.ExtensionID][]extensions.PointID{
-		greeter.ID: {greeterv0.Point.ID()},
+		greeter.ID: {greeter.Point.ID()},
 	})
 
 	var backends []grpcproxy.Backend
@@ -93,7 +93,7 @@ func TestPointSocketExposure(t *testing.T) {
 
 		backend := grpcproxy.Backend{ID: string(ext), Conn: conn}
 		for _, point := range points {
-			backend.Packages = append(backend.Packages, string(point))
+			backend.Services = append(backend.Services, h.OfferedServices(point, ext)...)
 		}
 
 		backends = append(backends, backend)
@@ -106,6 +106,8 @@ func TestPointSocketExposure(t *testing.T) {
 	lis, err := net.Listen("unix", sock)
 	assert.NilError(t, err)
 	proxy := grpcproxy.New(routes)
+
+	assert.Check(t, !proxy.Handles("org.mobyproject.extension.example.greeter.v0.Other"))
 	go func() { _ = proxy.Serve(lis) }()
 	defer proxy.Stop()
 
@@ -145,6 +147,7 @@ func TestProcessOfferIsDroppedByDefault(t *testing.T) {
 	defer func() { assert.NilError(t, h.Shutdown(context.WithoutCancel(ctx))) }()
 
 	assert.Check(t, offeredPoints(h)[id] == nil)
+	assert.Check(t, len(h.OfferedServices(echopb.ClientPoint.Point, id)) == 0)
 
 	conn, ok := h.Conn(id)
 	assert.Check(t, ok)
@@ -215,7 +218,7 @@ func TestInProcessPointExposure(t *testing.T) {
 		host.WithProviderPolicy(host.PointPolicyFunc(func(identity extensions.ExtensionIdentity, point extensions.PointID) host.PointPolicyResult {
 			policyPoints = append(policyPoints, point)
 			policyIdentity = identity
-			if identity.ID == greeter.ID && (point == greeterv0.Point.ID() || point == servicev0.Point.ID()) {
+			if identity.ID == greeter.ID && (point == greeter.Point.ID() || point == servicev0.Point.ID()) {
 				return host.Allow()
 			}
 			return host.Drop()
@@ -223,19 +226,20 @@ func TestInProcessPointExposure(t *testing.T) {
 	)
 	assert.NilError(t, err)
 	defer func() { assert.NilError(t, h.Shutdown(context.WithoutCancel(ctx))) }()
-	assert.DeepEqual(t, policyPoints, []extensions.PointID{greeterv0.Point.ID(), servicev0.Point.ID()})
+
+	assert.DeepEqual(t, policyPoints, []extensions.PointID{greeter.Point.ID(), servicev0.Point.ID()})
 	assert.Equal(t, policyIdentity, extensions.ExtensionIdentity{
 		ID:     greeter.ID,
 		Origin: extensions.ExtensionOrigin{Kind: extensions.ExtensionOriginBuiltin},
 	})
 	assert.DeepEqual(t, offeredPoints(h), map[extensions.ExtensionID][]extensions.PointID{
-		greeter.ID: {greeterv0.Point.ID()},
+		greeter.ID: {greeter.Point.ID()},
 	})
-	impl, err := h.Provider(greeterv0.Point.ID(), greeter.ID)
+	impl, err := h.Provider(greeter.Point.ID(), greeter.ID)
 	assert.NilError(t, err)
 
 	srv := grpc.NewServer()
-	assert.NilError(t, servicegrpc.Register(srv, greeterpb.ServerPoint, impl))
+	assert.NilError(t, servicegrpc.Register(srv, greeter.ServerPoint, impl))
 	sock := filepath.Join(shortTempDir(t), "api.sock")
 	lis, err := net.Listen("unix", sock)
 	assert.NilError(t, err)
@@ -304,7 +308,7 @@ func TestOffersReachableForBuiltinAndProcessExtensions(t *testing.T) {
 	assert.NilError(t, err)
 	defer func() { assert.NilError(t, h.Shutdown(context.WithoutCancel(ctx))) }()
 
-	servers := map[extensions.PointID]serverpoint.Registration{greeterv0.Point.ID(): greeterpb.ServerPoint}
+	servers := map[extensions.PointID]serverpoint.Registration{greeter.Point.ID(): greeter.ServerPoint}
 	inProcess := grpc.NewServer()
 
 	var backends []grpcproxy.Backend
@@ -313,7 +317,7 @@ func TestOffersReachableForBuiltinAndProcessExtensions(t *testing.T) {
 		if conn, ok := h.Conn(id); ok {
 			backend := grpcproxy.Backend{ID: string(id), Conn: conn}
 			for _, point := range points {
-				backend.Packages = append(backend.Packages, string(point))
+				backend.Services = append(backend.Services, h.OfferedServices(point, id)...)
 			}
 
 			backends = append(backends, backend)

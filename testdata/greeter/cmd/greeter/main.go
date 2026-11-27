@@ -6,11 +6,10 @@
 package main
 
 import (
-	greeterpb "github.com/moby/extensions/example/greeter/v0/protogen"
 	"github.com/moby/extensions/sdk"
 	"github.com/moby/extensions/testdata/greeter"
 )
 
 func main() {
-	sdk.Main(greeter.Extension, sdk.WithServerPoints(greeterpb.ServerPoint))
+	sdk.Main(greeter.Extension, sdk.WithServerPoints(greeter.ServerPoint))
 }

@@ -196,13 +196,17 @@ func WithDependencyProviders(providers ...serverpoint.Registration) Option {
 
 // Host runs extensions and resolves their point providers.
 type Host struct {
-	broker *broker.Broker
-	// conns holds connections to launched extensions for socket proxying.
-	conns map[extensions.ExtensionID]grpc.ClientConnInterface
+	broker    *broker.Broker
+	processes map[extensions.ExtensionID]processBackend
 	// loaded owns resources acquired for executable extensions in load order.
 	loaded []loadedExtension
 	// callback serves launched extensions' declared dependencies.
 	callback *grpc.Server
+}
+
+type processBackend struct {
+	conn     grpc.ClientConnInterface
+	services map[extensions.PointID][]string
 }
 
 type loadedExtension struct {
@@ -231,8 +235,15 @@ type hostedExtension struct {
 
 // Conn returns the gRPC connection to a launched extension.
 func (h *Host) Conn(extension extensions.ExtensionID) (grpc.ClientConnInterface, bool) {
-	conn, ok := h.conns[extension]
-	return conn, ok
+	process, ok := h.processes[extension]
+	return process.conn, ok
+}
+
+// OfferedServices returns the gRPC service names for one admitted offer from a
+// launched extension.
+// It returns nil for in-process extensions and points not offered or admitted.
+func (h *Host) OfferedServices(point extensions.PointID, extension extensions.ExtensionID) []string {
+	return slices.Clone(h.processes[extension].services[point])
 }
 
 // New registers, launches, and initializes the configured extensions. It tears
@@ -253,7 +264,7 @@ func New(ctx context.Context, optionList ...Option) (_ *Host, retErr error) {
 
 	policy := opts.providerPolicy
 	b := broker.New()
-	conns := make(map[extensions.ExtensionID]grpc.ClientConnInterface)
+	processes := make(map[extensions.ExtensionID]processBackend)
 
 	var (
 		loaded     []loadedExtension
@@ -359,7 +370,7 @@ func New(ctx context.Context, optionList ...Option) (_ *Host, retErr error) {
 				return nil, err
 			}
 			registered = append(registered, registeredExtension{identity: identity, providers: admittedProviders})
-			conns[identity.ID] = started.Conn
+			processes[identity.ID] = processBackend{conn: started.Conn, services: admittedServices(admittedProviders, started.ProviderServices)}
 		}
 	}
 
@@ -406,7 +417,26 @@ func New(ctx context.Context, optionList ...Option) (_ *Host, retErr error) {
 		log.G(ctx).WithFields(fields).Info("loaded extension")
 	}
 
-	return &Host{broker: b, conns: conns, loaded: loaded, callback: callback}, nil
+	return &Host{broker: b, processes: processes, loaded: loaded, callback: callback}, nil
+}
+
+func admittedServices(providers []extensions.Provider, inventory map[extensions.PointID][]string) map[extensions.PointID][]string {
+	for _, provider := range providers {
+		if provider.Point != servicev0.Point.ID() {
+			continue
+		}
+
+		offered := provider.Impl.(servicev0.Provider).OfferedPoints()
+
+		services := make(map[extensions.PointID][]string, len(offered))
+		for _, point := range offered {
+			services[point] = inventory[point]
+		}
+
+		return services
+	}
+
+	return nil
 }
 
 func validateHostIdentity(identity extensions.ExtensionIdentity, decl extensions.Declaration) error {

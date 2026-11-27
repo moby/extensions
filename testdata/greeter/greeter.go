@@ -9,11 +9,18 @@ import (
 
 	"github.com/moby/extensions"
 	greeterv0 "github.com/moby/extensions/example/greeter/v0"
+	greeterpb "github.com/moby/extensions/example/greeter/v0/protogen"
 	servicev0 "github.com/moby/extensions/extpoints/service/v0"
+	"github.com/moby/extensions/serverpoint"
 )
 
 // ID is the extension id and binary name.
 const ID = "org.mobyproject.example.greeter.v1"
+
+// Point deliberately differs from the proto package serving Greeter.
+var Point = extensions.DefinePoint[greeterv0.Greeter]("org.example.greeting.v1")
+
+var ServerPoint = serverpoint.Registration{Point: Point.ID(), Register: greeterpb.ServerPoint.Register}
 
 type greeter struct{}
 
@@ -25,7 +32,7 @@ func (greeter) Greet(_ context.Context, req *greeterv0.HelloRequest) (*greeterv0
 var Extension = extensions.New(extensions.Declaration{
 	ID: ID,
 	Providers: []extensions.Provider{
-		greeterv0.Point.Provide(greeter{}),
-		servicev0.Offer(greeterv0.Point),
+		Point.Provide(greeter{}),
+		servicev0.Offer(Point),
 	},
 })

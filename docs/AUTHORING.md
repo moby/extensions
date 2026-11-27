@@ -213,7 +213,7 @@ Use `host.WithProviderPolicy` to restrict which extensions may provide internall
 See [DESIGN.md#discovery-security](./DESIGN.md#discovery-security).
 
 A Point that only external callers use does not need `ClientPoint` wiring.
-Offer it for publication instead: the proxy forwards calls for the offered Point's proto package to the extension without decoding them.
+Offer it for publication instead: the proxy forwards calls for the offered Point's services to the extension without decoding them.
 For example, a naming Point that the daemon calls needs `ClientPoint`, while a job API that only external tools call needs only an offer.
 
 ### Publishing an ordinary Point
@@ -280,10 +280,10 @@ for _, offer := range h.Providers(servicev0.Point.ID()) {
 	id := offer.Identity.ID
 	points := offer.Impl.(servicev0.Provider).OfferedPoints()
 	if conn, ok := h.Conn(id); ok {
-		// Launched: forward each offered Point's proto package to the extension.
+		// Launched: route only the services reported for each admitted offer.
 		backend := grpcproxy.Backend{ID: string(id), Conn: conn}
 		for _, point := range points {
-			backend.Packages = append(backend.Packages, string(point))
+			backend.Services = append(backend.Services, h.OfferedServices(point, id)...)
 		}
 		backends = append(backends, backend)
 		continue
@@ -317,7 +317,8 @@ reply, err := client.Greet(ctx, &greeterv0.HelloRequest{Name: "world"})
 ```
 
 The current backend is gRPC.
-For a launched extension, the SDK registers the generated service, and the proxy forwards the raw gRPC stream for the offered Point's package, including metadata and status.
+For a launched extension, use the reported service names rather than inferring a proto package from the Point ID.
+The proxy forwards the raw gRPC stream, including metadata and status.
 Arbitrary raw gRPC publication is not part of the extension API.
 
 ## Writing an extension

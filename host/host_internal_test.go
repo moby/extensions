@@ -131,6 +131,18 @@ func TestExtensionFromHostedRejectsUnsupportedPoints(t *testing.T) {
 		offered:  []extensions.PointID{offered},
 	}, providers)
 	assert.NilError(t, err)
+
+	got := ext.Declaration().Providers
+	assert.Equal(t, len(got), 2)
+	assert.Equal(t, got[1].Point, servicev0.Point.ID())
+	assert.DeepEqual(t, got[1].Impl.(servicev0.Provider).OfferedPoints(), []extensions.PointID{offered})
+
+	// An empty offer still reaches policy admission.
+	ext, err = extensionFromHosted(hostedExtension{
+		identity: executableIdentity("org.example.ext.v1"),
+		points:   []extensions.PointID{servicev0.Point.ID()},
+	}, providers)
+	assert.NilError(t, err)
 	assert.Equal(t, len(ext.Declaration().Providers), 1)
 }
 
@@ -535,7 +547,7 @@ func TestExtensionDroppedByPolicy(t *testing.T) {
 }
 
 // TestProviderAndPublicationPolicyPoints verifies that provider admission and
-// publication use their respective Point IDs.
+// offers use their respective Point IDs.
 func TestProviderAndPublicationPolicyPoints(t *testing.T) {
 	const id = extensions.ExtensionID("org.example.offered.v1")
 	const realPoint = extensions.PointID("org.example.internal.v1")
@@ -547,20 +559,11 @@ func TestProviderAndPublicationPolicyPoints(t *testing.T) {
 			servicev0.Offer(pointDef),
 		},
 	})
-	server := serverpoint.Registration{
-		Point: realPoint,
-		Register: func(registrar grpc.ServiceRegistrar, impl any) {
-			registrar.RegisterService(&grpc.ServiceDesc{
-				ServiceName: "example.API",
-				HandlerType: (*any)(nil),
-			}, impl)
-		},
-	}
+
 	var policyPoints []extensions.PointID
 	h, err := New(t.Context(),
 		WithRuntimeDir(t.TempDir()),
 		WithExtensions(ext),
-		WithPointServers(server),
 		WithProviderPolicy(PointPolicyFunc(func(_ extensions.ExtensionIdentity, point extensions.PointID) PointPolicyResult {
 			policyPoints = append(policyPoints, point)
 			if point == realPoint {
@@ -575,7 +578,9 @@ func TestProviderAndPublicationPolicyPoints(t *testing.T) {
 	provider, err := h.Provider(realPoint, id)
 	assert.NilError(t, err)
 	assert.Equal(t, provider, struct{}{})
-	assert.DeepEqual(t, h.PublishedServicesForPoint(realPoint), map[extensions.ExtensionID][]string{})
+
+	_, err = h.Provider(servicev0.Point.ID(), id)
+	assert.ErrorContains(t, err, "does not provide point")
 }
 
 // TestLaunchedExtensionCarriesShutdown verifies launched extensions participate
@@ -810,187 +815,22 @@ func TestHostShutdownJoinsSemanticAndResourceErrors(t *testing.T) {
 	assert.Assert(t, errors.Is(err, resourceErr))
 }
 
-func TestApproveProcessPublications(t *testing.T) {
-	const point = extensions.PointID("org.example.api.v1")
-	const otherPoint = extensions.PointID("org.example.other.v1")
-	launched := &launcher.Launched{
-		ID:            "org.example.first.v1",
-		OfferedPoints: []extensions.PointID{point, otherPoint},
-		ProviderServices: map[extensions.PointID][]string{
-			point:      {"example.API"},
-			otherPoint: {"example.Other"},
-		},
-	}
-	identity := executableIdentity(launched.ID)
-	allow := PointPolicyFunc(func(extensions.ExtensionIdentity, extensions.PointID) PointPolicyResult { return Allow() })
-	drop := PointPolicyFunc(func(extensions.ExtensionIdentity, extensions.PointID) PointPolicyResult { return Drop() })
-	newPublication := func(policy PointPolicy) *publicationState {
-		return &publicationState{
-			policy:    policy,
-			published: make(map[extensions.ExtensionID]map[extensions.PointID][]string),
-			owners:    make(map[string]extensions.ExtensionID),
-		}
-	}
+// TestRestrictOffersKeepsOfferedOnlyPoints verifies a process offer loses
+// points whose wired provider policy dropped, but keeps offered-only points,
+// which have no provider to drop.
+func TestRestrictOffersKeepsOfferedOnlyPoints(t *testing.T) {
+	const (
+		wired       = extensions.PointID("org.example.wired.v1")
+		offeredOnly = extensions.PointID("org.example.offered.v1")
+	)
 
-	t.Run("nil policy drops", func(t *testing.T) {
-		publication := newPublication(nil)
-		assert.NilError(t, approveProcessPublications(identity, launched, publication, nil))
-		assert.Equal(t, len(publication.published), 0)
-	})
+	offer := servicev0.Point.Provide(offers{wired, offeredOnly})
+	declared := []extensions.Provider{{Point: wired}, offer}
 
-	t.Run("nil function policy rejects", func(t *testing.T) {
-		publication := newPublication(PointPolicyFunc(nil))
-		err := approveProcessPublications(identity, launched, publication, nil)
-		assert.ErrorContains(t, err, "point policy rejected the requested use")
-		assert.Equal(t, len(publication.published), 0)
-	})
-
-	t.Run("dropped offer is omitted", func(t *testing.T) {
-		publication := newPublication(drop)
-		assert.NilError(t, approveProcessPublications(identity, launched, publication, nil))
-		assert.Equal(t, len(publication.published), 0)
-	})
-
-	t.Run("rejected offer fails with cause", func(t *testing.T) {
-		cause := errors.New("publication denied")
-		policy := PointPolicyFunc(func(extensions.ExtensionIdentity, extensions.PointID) PointPolicyResult {
-			return Reject(cause)
-		})
-		err := approveProcessPublications(identity, launched, newPublication(policy), nil)
-		assert.Assert(t, errors.Is(err, cause))
-		assert.ErrorContains(t, err, `publish offered points for extension "org.example.first.v1"`)
-		assert.ErrorContains(t, err, `origin "executable"`)
-		assert.ErrorContains(t, err, `point "org.mobyproject.extension.service.v0"`)
-	})
-
-	t.Run("allowed offers are copied", func(t *testing.T) {
-		publication := newPublication(allow)
-		assert.NilError(t, approveProcessPublications(identity, launched, publication, nil))
-		assert.DeepEqual(t, publication.published[launched.ID][point], []string{"example.API"})
-		assert.DeepEqual(t, publication.published[launched.ID][otherPoint], []string{"example.Other"})
-		launched.ProviderServices[point][0] = "changed"
-		assert.DeepEqual(t, publication.published[launched.ID][point], []string{"example.API"})
-		launched.ProviderServices[point][0] = "example.API"
-	})
-
-	t.Run("a dropped wired provider cannot publish but an offered-only point can", func(t *testing.T) {
-		publication := newPublication(allow)
-		dropped := droppedProviderPoints(
-			[]extensions.Provider{{Point: point}, {Point: "org.example.internal.v1"}},
-			[]extensions.Provider{{Point: "org.example.internal.v1"}},
-		)
-		assert.NilError(t, approveProcessPublications(identity, launched, publication, dropped))
-		assert.DeepEqual(t, publication.published[launched.ID], map[extensions.PointID][]string{
-			otherPoint: {"example.Other"},
-		})
-	})
-
-	t.Run("provider policy is called once with service metadata", func(t *testing.T) {
-		var policyPoints []extensions.PointID
-		policy := PointPolicyFunc(func(_ extensions.ExtensionIdentity, point extensions.PointID) PointPolicyResult {
-			policyPoints = append(policyPoints, point)
-			if point == servicev0.Point.ID() {
-				return Allow()
-			}
-			return Drop()
-		})
-		publication := newPublication(policy)
-		assert.NilError(t, approveProcessPublications(identity, launched, publication, nil))
-		assert.DeepEqual(t, policyPoints, []extensions.PointID{servicev0.Point.ID()})
-		assert.Equal(t, len(publication.published[launched.ID]), 2)
-	})
-
-	t.Run("missing service is rejected", func(t *testing.T) {
-		missing := &launcher.Launched{ID: launched.ID, OfferedPoints: []extensions.PointID{point}}
-		err := approveProcessPublications(identity, missing, newPublication(allow), nil)
-		assert.ErrorContains(t, err, "without a gRPC service")
-	})
-
-	t.Run("reserved service is rejected", func(t *testing.T) {
-		publication := newPublication(allow)
-		publication.reserved = map[string]bool{"example.API": true}
-		err := approveProcessPublications(identity, launched, publication, nil)
-		assert.ErrorContains(t, err, `cannot publish reserved gRPC service "example.API"`)
-	})
-
-	t.Run("service collision is rejected", func(t *testing.T) {
-		publication := newPublication(allow)
-		publication.owners["example.API"] = "org.example.other.v1"
-		err := approveProcessPublications(identity, launched, publication, nil)
-		assert.ErrorContains(t, err, `extensions "org.example.other.v1" and "org.example.first.v1" both publish gRPC service "example.API"`)
-	})
-}
-
-func TestInProcessPublicationValidation(t *testing.T) {
-	pointDefinition := extensions.DefinePoint[any]("org.example.api.v1")
-	point := pointDefinition.ID()
-	ext := extensions.New(extensions.Declaration{
-		ID: "org.example.extension.v1",
-		Providers: []extensions.Provider{
-			pointDefinition.Provide(struct{}{}),
-			servicev0.Offer(pointDefinition),
-		},
-	})
-	identity := extensions.ExtensionIdentity{ID: ext.Declaration().ID, Origin: extensions.ExtensionOrigin{Kind: extensions.ExtensionOriginBuiltin}}
-	allow := PointPolicyFunc(func(extensions.ExtensionIdentity, extensions.PointID) PointPolicyResult { return Allow() })
-	drop := PointPolicyFunc(func(extensions.ExtensionIdentity, extensions.PointID) PointPolicyResult { return Drop() })
-	newPublication := func(policy PointPolicy, servers map[extensions.PointID]serverpoint.Registration) *publicationState {
-		return &publicationState{
-			policy:    policy,
-			servers:   servers,
-			published: make(map[extensions.ExtensionID]map[extensions.PointID][]string),
-			owners:    make(map[string]extensions.ExtensionID),
-		}
-	}
-
-	t.Run("dropped offer needs no adapter", func(t *testing.T) {
-		services, err := collectInProcessPublications(identity, ext, newPublication(drop, nil), nil)
-		assert.NilError(t, err)
-		assert.Equal(t, len(services), 0)
-	})
-
-	t.Run("allowed offer needs adapter", func(t *testing.T) {
-		_, err := collectInProcessPublications(identity, ext, newPublication(allow, nil), nil)
-		assert.ErrorContains(t, err, "has no server registration")
-	})
-
-	registration := serverpoint.Registration{
-		Point: point,
-		Register: func(registrar grpc.ServiceRegistrar, impl any) {
-			registrar.RegisterService(&grpc.ServiceDesc{ServiceName: "example.API", HandlerType: (*any)(nil)}, impl)
-		},
-	}
-	servers := map[extensions.PointID]serverpoint.Registration{point: registration}
-
-	t.Run("reserved service is rejected", func(t *testing.T) {
-		publication := newPublication(allow, servers)
-		publication.reserved = map[string]bool{"example.API": true}
-		_, err := collectInProcessPublications(identity, ext, publication, nil)
-		assert.ErrorContains(t, err, `cannot publish reserved gRPC service "example.API"`)
-	})
-
-	t.Run("process service collision is rejected", func(t *testing.T) {
-		publication := newPublication(allow, servers)
-		publication.owners["example.API"] = "org.example.process.v1"
-		_, err := collectInProcessPublications(identity, ext, publication, nil)
-		assert.ErrorContains(t, err, `extensions "org.example.process.v1" and "org.example.extension.v1" both publish gRPC service "example.API"`)
-	})
-
-	t.Run("in-process service collision is rejected", func(t *testing.T) {
-		publication := newPublication(allow, servers)
-		_, err := collectInProcessPublications(identity, ext, publication, nil)
-		assert.NilError(t, err)
-		other := extensions.New(extensions.Declaration{
-			ID: "org.example.other.v1",
-			Providers: []extensions.Provider{
-				pointDefinition.Provide(struct{}{}),
-				servicev0.Offer(pointDefinition),
-			},
-		})
-		otherIdentity := extensions.ExtensionIdentity{ID: other.Declaration().ID, Origin: extensions.ExtensionOrigin{Kind: extensions.ExtensionOriginBuiltin}}
-		_, err = collectInProcessPublications(otherIdentity, other, publication, nil)
-		assert.ErrorContains(t, err, `extensions "org.example.extension.v1" and "org.example.other.v1" both publish gRPC service "example.API"`)
-	})
+	got := restrictOffers(declared, []extensions.Provider{offer})
+	assert.Equal(t, len(got), 1)
+	assert.DeepEqual(t, got[0].Impl.(servicev0.Provider).OfferedPoints(), []extensions.PointID{offeredOnly})
+	assert.Equal(t, len(restrictOffers(declared, nil)), 0)
 }
 
 func TestInProcessPublicationPolicy(t *testing.T) {
@@ -1004,34 +844,24 @@ func TestInProcessPublicationPolicy(t *testing.T) {
 			servicev0.Offer(pointDefinition),
 		},
 	})
-	server := serverpoint.Registration{
-		Point: point,
-		Register: func(registrar grpc.ServiceRegistrar, impl any) {
-			registrar.RegisterService(&grpc.ServiceDesc{ServiceName: "example.API", HandlerType: (*any)(nil)}, impl)
-		},
-	}
 
-	t.Run("nil policy keeps provider and drops publication", func(t *testing.T) {
+	t.Run("nil policy keeps provider and drops offers", func(t *testing.T) {
 		h, err := New(t.Context(),
 			WithRuntimeDir(t.TempDir()),
 			WithExtensions(ext),
-			WithPointServers(server),
 		)
 		assert.NilError(t, err)
 		defer func() { assert.NilError(t, h.Shutdown(context.WithoutCancel(t.Context()))) }()
 		assert.Equal(t, len(h.Providers(point)), 1)
-		assert.Equal(t, len(h.PublishedServicesForPoint(point)), 0)
+		assert.Equal(t, len(h.Providers(servicev0.Point.ID())), 0)
 	})
 
-	t.Run("dropping the only provider drops the extension entirely, publication included", func(t *testing.T) {
-		// Metadata providers are always admitted and must not rescue an
-		// extension from being fully dropped: the extension's only ordinary
-		// provider is dropped here, so publication must not happen either,
-		// even though the publication policy call itself would allow it.
+	t.Run("dropping the only provider drops the extension entirely, offers included", func(t *testing.T) {
+		// An allowed offer must not rescue an extension whose only offered
+		// provider is dropped.
 		h, err := New(t.Context(),
 			WithRuntimeDir(t.TempDir()),
 			WithExtensions(ext),
-			WithPointServers(server),
 			WithProviderPolicy(PointPolicyFunc(func(_ extensions.ExtensionIdentity, policyPoint extensions.PointID) PointPolicyResult {
 				if policyPoint == servicev0.Point.ID() {
 					return Allow()
@@ -1042,7 +872,7 @@ func TestInProcessPublicationPolicy(t *testing.T) {
 		assert.NilError(t, err)
 		defer func() { assert.NilError(t, h.Shutdown(context.WithoutCancel(t.Context()))) }()
 		assert.Equal(t, len(h.Providers(point)), 0)
-		assert.DeepEqual(t, h.PublishedServicesForPoint(point), map[extensions.ExtensionID][]string{})
+		assert.Equal(t, len(h.Providers(servicev0.Point.ID())), 0)
 	})
 
 	t.Run("dropping one provider keeps only the other offer", func(t *testing.T) {
@@ -1056,22 +886,9 @@ func TestInProcessPublicationPolicy(t *testing.T) {
 				servicev0.Offer(keptPoint, droppedPoint),
 			},
 		})
-		keptServer := serverpoint.Registration{
-			Point: keptPoint.ID(),
-			Register: func(registrar grpc.ServiceRegistrar, impl any) {
-				registrar.RegisterService(&grpc.ServiceDesc{ServiceName: "example.Kept", HandlerType: (*any)(nil)}, impl)
-			},
-		}
-		droppedServer := serverpoint.Registration{
-			Point: droppedPoint.ID(),
-			Register: func(registrar grpc.ServiceRegistrar, impl any) {
-				registrar.RegisterService(&grpc.ServiceDesc{ServiceName: "example.Dropped", HandlerType: (*any)(nil)}, impl)
-			},
-		}
 		h, err := New(t.Context(),
 			WithRuntimeDir(t.TempDir()),
 			WithExtensions(partial),
-			WithPointServers(keptServer, droppedServer),
 			WithProviderPolicy(PointPolicyFunc(func(_ extensions.ExtensionIdentity, policyPoint extensions.PointID) PointPolicyResult {
 				if policyPoint == keptPoint.ID() || policyPoint == servicev0.Point.ID() {
 					return Allow()
@@ -1083,11 +900,12 @@ func TestInProcessPublicationPolicy(t *testing.T) {
 		defer func() { assert.NilError(t, h.Shutdown(context.WithoutCancel(t.Context()))) }()
 		assert.Equal(t, len(h.Providers(keptPoint.ID())), 1)
 		assert.Equal(t, len(h.Providers(droppedPoint.ID())), 0)
-		assert.DeepEqual(t, h.PublishedServicesForPoint(keptPoint.ID()), map[extensions.ExtensionID][]string{id: {"example.Kept"}})
-		assert.DeepEqual(t, h.PublishedServicesForPoint(droppedPoint.ID()), map[extensions.ExtensionID][]string{})
+		offer, err := h.Provider(servicev0.Point.ID(), id)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, offer.(servicev0.Provider).OfferedPoints(), []extensions.PointID{keptPoint.ID()})
 	})
 
-	t.Run("rejecting publication still fails when the provider is dropped", func(t *testing.T) {
+	t.Run("rejecting offers still fails when the provider is dropped", func(t *testing.T) {
 		cause := errors.New("publication denied")
 		_, err := New(t.Context(),
 			WithRuntimeDir(t.TempDir()),
@@ -1107,7 +925,6 @@ func TestInProcessPublicationPolicy(t *testing.T) {
 		h, err := New(t.Context(),
 			WithRuntimeDir(t.TempDir()),
 			WithExtensions(ext),
-			WithPointServers(server),
 			WithProviderPolicy(PointPolicyFunc(func(_ extensions.ExtensionIdentity, policyPoint extensions.PointID) PointPolicyResult {
 				if policyPoint == servicev0.Point.ID() {
 					return Reject(cause)
@@ -1117,27 +934,7 @@ func TestInProcessPublicationPolicy(t *testing.T) {
 		)
 		assert.Assert(t, h == nil)
 		assert.Assert(t, errors.Is(err, cause))
-		assert.ErrorContains(t, err, `publish offered points for extension "org.example.extension.v1"`)
+		assert.ErrorContains(t, err, `admit provider for extension "org.example.extension.v1"`)
+		assert.ErrorContains(t, err, `point "org.mobyproject.extension.service.v0"`)
 	})
-}
-
-func TestPublishedServicesForPointUsesPolicyFilteredIndex(t *testing.T) {
-	const point = extensions.PointID("org.example.publication.v1")
-	h := &Host{publishedServices: map[extensions.ExtensionID]map[extensions.PointID][]string{
-		"org.example.first.v1": {
-			point: {"example.First", "example.Second"},
-		},
-		"org.example.empty.v1": {
-			point: nil,
-		},
-	}}
-
-	got := h.PublishedServicesForPoint(point)
-	assert.DeepEqual(t, got, map[extensions.ExtensionID][]string{
-		"org.example.first.v1": {"example.First", "example.Second"},
-	})
-	got["org.example.first.v1"][0] = "changed"
-	assert.Equal(t, h.publishedServices["org.example.first.v1"][point][0], "example.First")
-	assert.DeepEqual(t, h.PublishedServicesForPoint("org.example.unknown.v1"),
-		map[extensions.ExtensionID][]string{})
 }

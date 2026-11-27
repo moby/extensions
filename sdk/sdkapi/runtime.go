@@ -50,6 +50,7 @@ type Declaration struct {
 	Conflicts    []string           `pb:"4"`
 	// OfferedPoints lists implemented Points eligible for Host-controlled
 	// publication.
+	// A nonempty list requires the servicev0 Point in Providers.
 	OfferedPoints []string `pb:"5"`
 	// ProviderServices records the fully-qualified gRPC service names registered
 	// while serving each provider point. All of these services are available on

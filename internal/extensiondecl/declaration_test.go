@@ -38,6 +38,7 @@ func TestParseConvertsDeclaration(t *testing.T) {
 		Providers: []sdkapi.PointDeclaration{
 			{ID: "org.example.one.v1"},
 			{ID: "org.example.two.v1"},
+			{ID: "org.mobyproject.extension.service.v0"},
 		},
 		Dependencies: []sdkapi.Dependency{
 			{Point: "org.example.one.v1", Extension: "provider", Optional: true},
@@ -52,7 +53,7 @@ func TestParseConvertsDeclaration(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Assert(t, is.DeepEqual(decl, &Declaration{
 		ID:            extensions.ExtensionID("example"),
-		Points:        []extensions.PointID{"org.example.one.v1", "org.example.two.v1"},
+		Points:        []extensions.PointID{"org.example.one.v1", "org.example.two.v1", "org.mobyproject.extension.service.v0"},
 		OfferedPoints: []extensions.PointID{"org.example.one.v1"},
 		Dependencies:  []extensions.Dependency{{Point: "org.example.one.v1", Extension: "provider", Optional: true}},
 		Conflicts:     []extensions.ExtensionID{"conflict"},
@@ -72,11 +73,12 @@ func TestParseRejectsInvalidOffers(t *testing.T) {
 		services  []sdkapi.ProviderServices
 		want      string
 	}{
-		{name: "invalid", offers: []string{"not-versioned"}, want: "offered an invalid point"},
-		{name: "duplicate", providers: []sdkapi.PointDeclaration{{ID: point}}, offers: []string{point, point}, services: []sdkapi.ProviderServices{{Point: point, Services: []string{"example.API"}}}, want: "more than once"},
-		{name: "unimplemented", offers: []string{point}, want: "without implementing it"},
+		{name: "missing offer marker", providers: []sdkapi.PointDeclaration{{ID: point}}, offers: []string{point}, services: []sdkapi.ProviderServices{{Point: point, Services: []string{"example.API"}}}, want: `offered points without declaring provider "org.mobyproject.extension.service.v0"`},
+		{name: "invalid", providers: []sdkapi.PointDeclaration{{ID: metadata}}, offers: []string{"not-versioned"}, want: "offered an invalid point"},
+		{name: "duplicate", providers: []sdkapi.PointDeclaration{{ID: point}, {ID: metadata}}, offers: []string{point, point}, services: []sdkapi.ProviderServices{{Point: point, Services: []string{"example.API"}}}, want: "more than once"},
+		{name: "unimplemented", providers: []sdkapi.PointDeclaration{{ID: metadata}}, offers: []string{point}, want: "without implementing it"},
 		{name: "metadata point", providers: []sdkapi.PointDeclaration{{ID: metadata}}, offers: []string{metadata}, services: []sdkapi.ProviderServices{{Point: metadata, Services: []string{"example.Metadata"}}}, want: "cannot offer publication metadata"},
-		{name: "missing service", providers: []sdkapi.PointDeclaration{{ID: point}}, offers: []string{point}, want: "without reporting a service"},
+		{name: "missing service", providers: []sdkapi.PointDeclaration{{ID: point}, {ID: metadata}}, offers: []string{point}, want: "without reporting a service"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

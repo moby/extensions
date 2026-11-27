@@ -213,7 +213,7 @@ Use `host.WithProviderPolicy` to restrict which extensions may provide internall
 See [DESIGN.md#discovery-security](./DESIGN.md#discovery-security).
 
 A Point that only external callers use does not need `ClientPoint` wiring.
-Offer it for publication instead: the proxy forwards calls to the extension by gRPC service name without decoding them.
+Offer it for publication instead: the proxy forwards calls for the offered Point's services to the extension without decoding them.
 For example, a naming Point that the daemon calls needs `ClientPoint`, while a job API that only external tools call needs only an offer.
 
 ### Publishing an ordinary Point
@@ -241,7 +241,7 @@ Providers: []extensions.Provider{
 }
 ```
 
-The Host drops publication by default.
+The Host drops offers by default.
 Allow an offer only through explicit policy:
 
 ```go
@@ -256,7 +256,7 @@ _, err := host.New(ctx, host.WithProviderPolicy(host.PointPolicyFunc(func(identi
 
 Publication authorization uses `servicev0.Point.ID()` and receives the host-attested identity.
 Internal provider admission uses the same policy with ordinary Point IDs.
-A nil policy allows every internally wired provider and drops all publication.
+A nil policy allows every internally wired provider and drops all offers.
 A non-nil policy decides each use by identity and Point:
 
 - `Allow` admits the provider or publication.
@@ -264,18 +264,44 @@ A non-nil policy decides each use by identity and Point:
 - `Reject` fails Host construction and preserves its error cause.
 
 A zero result and a typed nil `PointPolicyFunc` reject the request.
-The `servicev0` offer marker itself is exempt from provider admission.
+The `servicev0` offer marker goes through the same admission and is limited to offered Points whose providers policy kept.
 Offered-only process Points have no internal provider, so the policy sees them only through `servicev0.Point.ID()`.
 
 If policy drops every ordinary provider of an extension, the Host skips the extension instead of initializing it.
-A launched extension stays loaded while it publishes an offered-only Point, because external callers still reach that Point through the proxy.
+A launched extension stays loaded while its offer of an offered-only Point is admitted, because external callers still reach that Point through the proxy.
 For example, when policy drops the naming Point an extension provides to the daemon but allows publication, the extension keeps serving its offered-only job API.
 
-For an in-process extension, supply generated adapters at Host composition:
+Extension code is the same whether it runs in-process or as a separate binary, and admitted offers resolve through `servicev0.Point` either way.
+Only the embedder's wiring differs, because an in-process provider is a Go value while a launched extension already serves gRPC over its connection:
 
 ```go
-host.WithPointServers(greeterpb.ServerPoint),
+var backends []grpcproxy.Backend
+for _, offer := range h.Providers(servicev0.Point.ID()) {
+	id := offer.Identity.ID
+	points := offer.Impl.(servicev0.Provider).OfferedPoints()
+	if conn, ok := h.Conn(id); ok {
+		// Launched: route only the services reported for each admitted offer.
+		backend := grpcproxy.Backend{ID: string(id), Conn: conn}
+		for _, point := range points {
+			backend.Services = append(backend.Services, h.OfferedServices(point, id)...)
+		}
+		backends = append(backends, backend)
+		continue
+	}
+	// In-process: serve the provider with its generated adapter.
+	for _, point := range points {
+		impl, err := h.Provider(point, id)
+		// ...
+		err = servicegrpc.Register(srv, serverPoints[point], impl)
+		// ...
+	}
+}
+routes, err := grpcproxy.BuildRoutes(backends, reserved)
+proxy := grpcproxy.New(routes)
 ```
+
+`serverPoints` maps each Point the embedder publishes to its generated `ServerPoint`, such as `greeterpb.ServerPoint`.
+Pass daemon-owned service names as `reserved` so an extension cannot shadow them.
 
 A separate binary passes every ordinary provider's generated `ServerPoint` to the SDK, whether the Point is internal, offered, or both:
 
@@ -291,7 +317,8 @@ reply, err := client.Greet(ctx, &greeterv0.HelloRequest{Name: "world"})
 ```
 
 The current backend is gRPC.
-For a launched extension, the SDK registers the generated service, the daemon records its fully qualified name, and the proxy forwards the raw gRPC stream, including metadata and status.
+For a launched extension, use the reported service names rather than inferring a proto package from the Point ID.
+The proxy forwards the raw gRPC stream, including metadata and status.
 Arbitrary raw gRPC publication is not part of the extension API.
 
 ## Writing an extension
@@ -502,7 +529,7 @@ See the [lifecycle limitations](./DESIGN.md#resolution-ordering-and-lifecycle).
 - [ ] Register every ordinary provider's `ServerPoint` in a separate binary.
 - [ ] Implement every published API as an ordinary `Point.Provide(impl)` provider.
 - [ ] Offer selected implemented Points with `servicev0.Offer`.
-- [ ] Add Host `WithProviderPolicy` and in-process `WithPointServers` wiring as needed.
+- [ ] Add Host `WithProviderPolicy`, and expose admitted offers resolved through `servicev0.Point`.
 - [ ] Keep handshake output on stdout and logs on stderr.
 - [ ] Install one correctly named, non-world-writable binary (not a symlink) in the trusted extension directory.
 
@@ -518,6 +545,6 @@ See the [lifecycle limitations](./DESIGN.md#resolution-ordering-and-lifecycle).
 - Supply configuration by extension id, or by the id without its version for every version, with `host.WithExtensionConfig`.
 - Resolve Points through the Host and call their contract helpers.
 - Restrict internal providers with `host.WithProviderPolicy` using ordinary Point IDs.
-- Offer implemented Points with `servicev0.Offer`, authorize publication through policy on `servicev0.Point.ID()`, and supply `host.WithPointServers` for in-process offers.
+- Offer implemented Points with `servicev0.Offer`, authorize publication through policy on `servicev0.Point.ID()`, and expose admitted offers resolved through `servicev0.Point`.
 - Call published Points with the generated `NewClient(hostConn)`.
 - Release lifecycle resources with `Host.Shutdown`.

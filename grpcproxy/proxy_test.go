@@ -54,7 +54,7 @@ func TestProxyServerStreaming(t *testing.T) {
 	backendSock := filepath.Join(shortTempDir(t), "backend.sock")
 	backendConn := serve(t, backendSock, func(s *grpc.Server) { s.RegisterService(&streamerDesc, nil) })
 
-	proxy := grpcproxy.New(map[string]grpc.ClientConnInterface{"test.Streamer": backendConn})
+	proxy := grpcproxy.New(grpcproxy.Routes{Services: map[string]grpc.ClientConnInterface{"test.Streamer": backendConn}})
 	proxySock := filepath.Join(shortTempDir(t), "proxy.sock")
 	lis, err := net.Listen("unix", proxySock)
 	assert.NilError(t, err)
@@ -108,6 +108,37 @@ func TestProxyUnary(t *testing.T) {
 	err := clientConn.Invoke(ctx, "/test.Unary/Echo", wrapperspb.String("hi"), &reply)
 	assert.NilError(t, err)
 	assert.Equal(t, reply.GetValue(), "echo:hi")
+}
+
+// TestProxyRoutesPackage verifies a package route forwards every service in
+// that package without listing service names, and nothing outside it.
+func TestProxyRoutesPackage(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	backendConn := serve(t, filepath.Join(shortTempDir(t), "backend.sock"), func(s *grpc.Server) { s.RegisterService(&unaryDesc, nil) })
+	proxy := grpcproxy.New(grpcproxy.Routes{Packages: map[string]grpc.ClientConnInterface{"test": backendConn}})
+	assert.Check(t, proxy.Handles("test.Unary"))
+	assert.Check(t, !proxy.Handles("test.sub.Unary"))
+	assert.Check(t, !proxy.Handles("other.Unary"))
+
+	proxySock := filepath.Join(shortTempDir(t), "proxy.sock")
+	lis, err := net.Listen("unix", proxySock)
+	assert.NilError(t, err)
+
+	go func() { _ = proxy.Serve(lis) }()
+
+	t.Cleanup(proxy.Stop)
+
+	clientConn, err := grpc.NewClient("unix:"+proxySock, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	assert.NilError(t, err)
+	t.Cleanup(func() { assert.NilError(t, clientConn.Close()) })
+
+	var reply wrapperspb.StringValue
+	assert.NilError(t, clientConn.Invoke(ctx, "/test.Unary/Echo", wrapperspb.String("hi"), &reply))
+	assert.Equal(t, reply.GetValue(), "echo:hi")
+	err = clientConn.Invoke(ctx, "/other.Unary/Echo", wrapperspb.String("hi"), &reply)
+	assert.Equal(t, status.Code(err), codes.Unimplemented)
 }
 
 var statusDesc = grpc.ServiceDesc{
@@ -219,7 +250,7 @@ func startProxy(t *testing.T, service string, register func(*grpc.Server)) *grpc
 	t.Helper()
 	backendConn := serve(t, filepath.Join(shortTempDir(t), "backend.sock"), register)
 
-	proxy := grpcproxy.New(map[string]grpc.ClientConnInterface{service: backendConn})
+	proxy := grpcproxy.New(grpcproxy.Routes{Services: map[string]grpc.ClientConnInterface{service: backendConn}})
 	proxySock := filepath.Join(shortTempDir(t), "proxy.sock")
 	lis, err := net.Listen("unix", proxySock)
 	assert.NilError(t, err)

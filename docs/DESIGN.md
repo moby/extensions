@@ -238,11 +238,13 @@ The final `OK` status of the provider shows success.
 Adapters reject a nil stream message from the caller with `InvalidArgument`.
 Adapters reject a nil stream message from a provider with `Internal`.
 
-Generated adapters return provider errors without changes.
-gRPC converts these errors at the server boundary.
-Explicit status errors keep their details.
-Context cancellation errors and deadline errors become `Canceled` and `DeadlineExceeded`, also when they are wrapped.
-All other errors become `Unknown`.
+Providers return ordinary Go errors; each point documents their meaning, such as a veto.
+There is no typed error schema.
+Generated servers and clients convert error classes with containerd's `errgrpc`, so they use containerd's status codes, and generated clients keep the original status inspectable.
+For example, `NotFound()` maps to `NotFound`, `Conflict()` to `FailedPrecondition`, and wrapped `context.Canceled` and `context.DeadlineExceeded` to `Canceled` and `DeadlineExceeded`.
+As in containerd, `Conflict()` is restored only when the message ends in `conflict`.
+An error that already contains a gRPC status crosses with that status and its details; unclassified errors cross gRPC as `Unknown`.
+Use `grpcerror` in hand-written gRPC servers and clients, including streams.
 
 Messages use proto3.
 Supported fields are scalar values, `string`, `[]byte`, repeated scalars such as `[]string`, string-keyed scalar maps such as `map[string]string`, pointer nested messages such as `*Other`, and repeated nested messages such as `[]Other`.
@@ -253,7 +255,6 @@ Proto3 scalars have no presence: `""`, `0`, and `false` are indistinguishable fr
 To distinguish "leave unchanged" from an explicit zero, use a message wrapper such as `*Thing`, a separate state flag, or an interpreted `bytes` payload.
 Optional scalars, `oneof`, enums, and well-known types such as timestamp and duration are unsupported.
 Use a Unix `int64` time, documented string enum-like values, or a `bytes` / JSON payload instead.
-There is no typed error schema: Go `error` crosses gRPC as a status, and each point documents its meaning, such as a veto.
 
 The current protocol may renumber, remove, or change fields without migration handling.
 Once a contract is declared stable, field numbers and types become permanent and breaking changes require a new `.vN`.

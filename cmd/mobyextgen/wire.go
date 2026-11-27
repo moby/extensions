@@ -38,6 +38,8 @@ func emitWire(pt point) ([]byte, error) {
 		fmt.Fprintln(&b, `	serverpoint "github.com/moby/extensions/serverpoint"`)
 	}
 	fmt.Fprintf(&b, "\t%s %q\n", cpkg, pt.importPath)
+	fmt.Fprintln(&b, `	grpcerror "github.com/moby/extensions/grpcerror"`)
+
 	if hasStreaming {
 		fmt.Fprintln(&b, `	extensionstream "github.com/moby/extensions/stream"`)
 		fmt.Fprintln(&b, `	codes "google.golang.org/grpc/codes"`)
@@ -281,6 +283,7 @@ func emitWire(pt point) ([]byte, error) {
 	}
 	fmt.Fprintf(&b, `
 	// grpcServer serves an implementation of the contract's Go interface.
+	// It encodes error classes as gRPC status codes for grpcClient to restore.
 	type grpcServer struct {
 		impl %[1]s.%[2]s
 	}
@@ -293,7 +296,7 @@ func emitWire(pt point) ([]byte, error) {
 				fmt.Fprintf(&b, `
 	func (s *grpcServer) %[1]s(ctx context.Context, req *%[2]s) (*%[3]s, error) {
 			if err := s.impl.%[1]s(ctx, %[4]sFromProto(req)); err != nil {
-				return nil, err
+				return nil, grpcerror.ToStatus(err)
 			}
 			return &%[3]s{}, nil
 		}
@@ -303,7 +306,7 @@ func emitWire(pt point) ([]byte, error) {
 	func (s *grpcServer) %[1]s(ctx context.Context, req *%[2]s) (*%[3]s, error) {
 			resp, err := s.impl.%[1]s(ctx, %[4]sFromProto(req))
 			if err != nil {
-				return nil, err
+				return nil, grpcerror.ToStatus(err)
 			}
 			return %[5]sToProto(resp), nil
 		}
@@ -313,7 +316,7 @@ func emitWire(pt point) ([]byte, error) {
 			fmt.Fprintf(&b, `
 	func (s *grpcServer) %[1]s(req *%[2]s, out grpc.ServerStreamingServer[%[3]s]) error {
 		sender := &mobyext%[1]sSender{stream: out}
-		return s.impl.%[1]s(out.Context(), %[4]sFromProto(req), sender)
+		return grpcerror.ToStatus(s.impl.%[1]s(out.Context(), %[4]sFromProto(req), sender))
 	}
 
 	type mobyext%[1]sSender struct {
@@ -322,9 +325,9 @@ func emitWire(pt point) ([]byte, error) {
 
 	func (s *mobyext%[1]sSender) Send(message *%[5]s.%[6]s) error {
 		if message == nil {
-			return status.Error(codes.Internal, %[7]q)
+			return grpcerror.FromStatus(status.Error(codes.Internal, %[7]q))
 		}
-		return s.stream.Send(%[8]sToProto(message))
+		return grpcerror.FromStatus(s.stream.Send(%[8]sToProto(message)))
 	}
 	`, m.name, m.request, m.response, lowerFirst(m.request), cpkg, m.response, m.name+": nil message", lowerFirst(m.response))
 		case methodClientStreaming:
@@ -333,7 +336,7 @@ func emitWire(pt point) ([]byte, error) {
 		receiver := &mobyext%[1]sReceiver{stream: stream}
 		resp, err := s.impl.%[1]s(stream.Context(), receiver)
 		if err != nil {
-			return err
+			return grpcerror.ToStatus(err)
 		}
 		return stream.SendAndClose(%[4]sToProto(resp))
 	}
@@ -345,7 +348,7 @@ func emitWire(pt point) ([]byte, error) {
 	func (r *mobyext%[1]sReceiver) Recv() (*%[5]s.%[6]s, error) {
 		message, err := r.stream.Recv()
 		if err != nil {
-			return nil, err
+			return nil, grpcerror.FromStatus(err)
 		}
 		return %[7]sFromProto(message), nil
 	}
@@ -365,7 +368,7 @@ func emitWire(pt point) ([]byte, error) {
 				fmt.Fprintf(&b, `
 	func (c *grpcClient) %[1]s(ctx context.Context, req *%[2]s.%[3]s) error {
 			_, err := c.client.%[1]s(ctx, %[4]sToProto(req))
-			return err
+			return grpcerror.FromStatus(err)
 		}
 	`, m.name, cpkg, m.request, lowerFirst(m.request))
 			} else {
@@ -373,7 +376,7 @@ func emitWire(pt point) ([]byte, error) {
 	func (c *grpcClient) %[1]s(ctx context.Context, req *%[2]s.%[3]s) (*%[2]s.%[5]s, error) {
 			resp, err := c.client.%[1]s(ctx, %[4]sToProto(req))
 			if err != nil {
-				return nil, err
+				return nil, grpcerror.FromStatus(err)
 			}
 			return %[6]sFromProto(resp), nil
 		}
@@ -386,18 +389,18 @@ func emitWire(pt point) ([]byte, error) {
 		defer cancel()
 		stream, err := c.client.%[1]s(ctx, %[5]sToProto(req))
 		if err != nil {
-			return err
+			return grpcerror.FromStatus(err)
 		}
 		for {
 			if err := ctx.Err(); err != nil {
-				return status.FromContextError(err).Err()
+				return grpcerror.FromStatus(status.FromContextError(err).Err())
 			}
 			message, err := stream.Recv()
 			if err != nil {
 				if errors.Is(err, io.EOF) {
 					return nil
 				}
-				return err
+				return grpcerror.FromStatus(err)
 			}
 			if err := sink.Send(%[6]sFromProto(message)); err != nil {
 				return err
@@ -412,7 +415,7 @@ func emitWire(pt point) ([]byte, error) {
 		defer cancel()
 		stream, err := c.client.%[1]s(ctx)
 		if err != nil {
-			return nil, err
+			return nil, grpcerror.FromStatus(err)
 		}
 		for {
 			message, err := source.Recv()
@@ -422,23 +425,23 @@ func emitWire(pt point) ([]byte, error) {
 				}
 				resp, err := stream.CloseAndRecv()
 				if err != nil {
-					return nil, err
+					return nil, grpcerror.FromStatus(err)
 				}
 				return %[5]sFromProto(resp), nil
 			}
 			if message == nil {
-				return nil, status.Error(codes.InvalidArgument, %[6]q)
+				return nil, grpcerror.FromStatus(status.Error(codes.InvalidArgument, %[6]q))
 			}
 			if err := ctx.Err(); err != nil {
-				return nil, status.FromContextError(err).Err()
+				return nil, grpcerror.FromStatus(status.FromContextError(err).Err())
 			}
 			if err := stream.Send(%[7]sToProto(message)); err != nil {
 				if !errors.Is(err, io.EOF) {
-					return nil, err
+					return nil, grpcerror.FromStatus(err)
 				}
 				resp, err := stream.CloseAndRecv()
 				if err != nil {
-					return nil, err
+					return nil, grpcerror.FromStatus(err)
 				}
 				return %[5]sFromProto(resp), nil
 			}

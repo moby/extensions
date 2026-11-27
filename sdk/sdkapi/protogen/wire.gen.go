@@ -6,6 +6,7 @@ package protogen
 
 import (
 	context "context"
+	grpcerror "github.com/moby/extensions/grpcerror"
 	mobyextcontract "github.com/moby/extensions/sdk/sdkapi"
 	grpc "google.golang.org/grpc"
 )
@@ -115,6 +116,7 @@ func NewClient(conn grpc.ClientConnInterface) mobyextcontract.Extension {
 }
 
 // grpcServer serves an implementation of the contract's Go interface.
+// It encodes error classes as gRPC status codes for grpcClient to restore.
 type grpcServer struct {
 	impl mobyextcontract.Extension
 }
@@ -122,7 +124,7 @@ type grpcServer struct {
 func (s *grpcServer) Describe(ctx context.Context, req *DescribeRequest) (*DescribeResponse, error) {
 	resp, err := s.impl.Describe(ctx, describeRequestFromProto(req))
 	if err != nil {
-		return nil, err
+		return nil, grpcerror.ToStatus(err)
 	}
 	return describeResponseToProto(resp), nil
 }
@@ -130,7 +132,7 @@ func (s *grpcServer) Describe(ctx context.Context, req *DescribeRequest) (*Descr
 func (s *grpcServer) Initialize(ctx context.Context, req *InitializeRequest) (*InitializeResponse, error) {
 	resp, err := s.impl.Initialize(ctx, initializeRequestFromProto(req))
 	if err != nil {
-		return nil, err
+		return nil, grpcerror.ToStatus(err)
 	}
 	return initializeResponseToProto(resp), nil
 }
@@ -142,7 +144,7 @@ type grpcClient struct {
 func (c *grpcClient) Describe(ctx context.Context, req *mobyextcontract.DescribeRequest) (*mobyextcontract.DescribeResponse, error) {
 	resp, err := c.client.Describe(ctx, describeRequestToProto(req))
 	if err != nil {
-		return nil, err
+		return nil, grpcerror.FromStatus(err)
 	}
 	return describeResponseFromProto(resp), nil
 }
@@ -150,7 +152,7 @@ func (c *grpcClient) Describe(ctx context.Context, req *mobyextcontract.Describe
 func (c *grpcClient) Initialize(ctx context.Context, req *mobyextcontract.InitializeRequest) (*mobyextcontract.InitializeResponse, error) {
 	resp, err := c.client.Initialize(ctx, initializeRequestToProto(req))
 	if err != nil {
-		return nil, err
+		return nil, grpcerror.FromStatus(err)
 	}
 	return initializeResponseFromProto(resp), nil
 }

@@ -554,7 +554,7 @@ func parseMessages(files []*ast.File, msgNames map[string]bool) ([]message, erro
 				if !ok || !msgNames[ts.Name.Name] {
 					continue
 				}
-				msg, err := parseMessage(ts.Name.Name, st, msgNames)
+				msg, err := parseMessage(f, ts.Name.Name, st, msgNames)
 				if err != nil {
 					return nil, err
 				}
@@ -566,7 +566,7 @@ func parseMessages(files []*ast.File, msgNames map[string]bool) ([]message, erro
 	return messages, nil
 }
 
-func parseMessage(name string, st *ast.StructType, msgNames map[string]bool) (message, error) {
+func parseMessage(file *ast.File, name string, st *ast.StructType, msgNames map[string]bool) (message, error) {
 	msg := message{name: name}
 	byNumber := map[int]string{} // field number -> Go field name, to catch reuse
 	for _, f := range st.Fields.List {
@@ -604,7 +604,7 @@ func parseMessage(name string, st *ast.StructType, msgNames map[string]bool) (me
 		}
 		protoName := camelToSnake(goName)
 		fl := field{goName: goName, protoName: protoName, protoGoName: goCamelCase(protoName), number: num}
-		if err := classify(f.Type, msgNames, &fl); err != nil {
+		if err := classify(file, f.Type, msgNames, &fl); err != nil {
 			return message{}, fmt.Errorf("%s.%s: %w", name, goName, err)
 		}
 		msg.fields = append(msg.fields, fl)
@@ -615,8 +615,16 @@ func parseMessage(name string, st *ast.StructType, msgNames map[string]bool) (me
 }
 
 // classify fills in fl.kind, fl.protoType and fl.mapKey from a Go field type.
-func classify(expr ast.Expr, msgNames map[string]bool, fl *field) error {
+func classify(file *ast.File, expr ast.Expr, msgNames map[string]bool, fl *field) error {
 	switch t := expr.(type) {
+	case *ast.SelectorExpr:
+		if pkg, ok := t.X.(*ast.Ident); ok && t.Sel.Name == "Duration" {
+			if path, _ := importedPath(file, pkg.Name); path == "time" {
+				fl.kind, fl.protoType = durationSingle, ".google.protobuf.Duration"
+				return nil
+			}
+		}
+		return errors.New("unsupported field type")
 	case *ast.Ident:
 		if s, ok := scalarProtoType(t.Name); ok {
 			fl.kind, fl.protoType = scalarSingle, s

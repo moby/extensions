@@ -120,7 +120,7 @@ The detailed rules are [DESIGN.md](./DESIGN.md#resolution-ordering-and-lifecycle
   Do not claim this timeout protects against a hanging in-process provider.
 - Use plain `pb:"N"`-tagged structs, stable field numbers, and existing data formats directly.
 
-Supported fields are scalar values, `string`, `[]byte`, repeated scalars such as `[]string`, string-keyed scalar maps, pointer nested messages such as `*Other`, and repeated nested messages such as `[]Other`.
+Supported fields are scalar values, `string`, `time.Duration`, `[]byte`, repeated scalars such as `[]string`, string-keyed scalar maps, pointer nested messages such as `*Other`, and repeated nested messages such as `[]Other`.
 A single nested message must be a pointer; the generator rejects a value field.
 
 The current framework is experimental and does not preserve compatibility for removed fields.

@@ -88,6 +88,24 @@ func TestSingleMessageField(t *testing.T) {
 		"wire should convert the single message from proto by pointer:\n%s", src)
 }
 
+func TestDurationField(t *testing.T) {
+	const contract = `package p
+import "context"
+import clock "time"
+type Service interface{ Do(context.Context, *Request) (*Request, error) }
+type Request struct{ Delay clock.Duration ` + "`pb:\"1\"`" + ` }
+`
+	pt, err := parseServiceSource(t, contract, "example.v1.Service")
+	assert.NilError(t, err)
+	src, err := emitProto(pt)
+	assert.NilError(t, err)
+	assert.Check(t, strings.Contains(string(src), `import "google/protobuf/duration.proto";`))
+	assert.Check(t, strings.Contains(string(src), ".google.protobuf.Duration delay = 1;"))
+
+	_, err = parseServiceSource(t, strings.Replace(contract, `"time"`, `"example.com/time"`, 1), "example.v1.Service")
+	assert.ErrorContains(t, err, "Request.Delay: unsupported field type")
+}
+
 func TestInitialismFieldBridgesNames(t *testing.T) {
 	const src = `package p
 import "context"

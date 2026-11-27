@@ -10,7 +10,9 @@ import (
 	gengo "google.golang.org/protobuf/cmd/protoc-gen-go/internal_gengo"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/pluginpb"
 )
 
@@ -24,8 +26,11 @@ func emitMessages(pt point) ([]byte, error) {
 	}
 	req := &pluginpb.CodeGeneratorRequest{
 		FileToGenerate: []string{pt.protoPath},
-		ProtoFile:      []*descriptorpb.FileDescriptorProto{fd},
 	}
+	if pt.usesDuration() {
+		req.ProtoFile = append(req.ProtoFile, protodesc.ToFileDescriptorProto(durationpb.File_google_protobuf_duration_proto))
+	}
+	req.ProtoFile = append(req.ProtoFile, fd)
 	gen, err := protogen.Options{}.New(req)
 	if err != nil {
 		return nil, fmt.Errorf("build protobuf generator: %w", err)
@@ -64,6 +69,9 @@ func fileDescriptor(pt point) (*descriptorpb.FileDescriptorProto, error) {
 		Options: &descriptorpb.FileOptions{GoPackage: new(pt.protogenImport())},
 	}
 
+	if pt.usesDuration() {
+		fd.Dependency = []string{durationProtoPath}
+	}
 	for _, msg := range pt.messages {
 		d, err := messageDescriptor(pt.id, msg)
 		if err != nil {
@@ -125,6 +133,9 @@ func messageDescriptor(pkg string, msg message) (*descriptorpb.DescriptorProto, 
 			}
 			fd.Type = t.Enum()
 			fd.Label = descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum()
+		case durationSingle:
+			fd.Type = descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum()
+			fd.TypeName = new(f.protoType)
 		case messageSingle:
 			fd.Type = descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum()
 			fd.TypeName = new("." + pkg + "." + f.protoType)

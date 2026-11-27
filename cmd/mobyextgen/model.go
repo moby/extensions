@@ -24,6 +24,19 @@ func (p point) grpcService() string { return p.id + "." + p.service }
 
 func (p point) protogenImport() string { return p.importPath + "/protogen" }
 
+const durationProtoPath = "google/protobuf/duration.proto"
+
+func (p point) usesDuration() bool {
+	for _, msg := range p.messages {
+		for _, f := range msg.fields {
+			if f.kind == durationSingle {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 type method struct {
 	kind      methodKind
 	name      string // method/rpc name
@@ -55,6 +68,7 @@ const (
 	scalarMap
 	messageSingle
 	messageRepeated
+	durationSingle
 )
 
 type field struct {

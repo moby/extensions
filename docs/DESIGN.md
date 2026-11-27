@@ -245,13 +245,13 @@ Context cancellation errors and deadline errors become `Canceled` and `DeadlineE
 All other errors become `Unknown`.
 
 Messages use proto3.
-Supported fields are scalar values, `string`, `[]byte`, repeated scalars such as `[]string`, string-keyed scalar maps such as `map[string]string`, pointer nested messages such as `*Other`, and repeated nested messages such as `[]Other`.
+Supported fields are scalar values, `string`, `time.Duration`, `[]byte`, repeated scalars such as `[]string`, string-keyed scalar maps such as `map[string]string`, pointer nested messages such as `*Other`, and repeated nested messages such as `[]Other`.
 A single nested message must be a pointer; value nested messages are rejected.
 Other shapes fail generation rather than producing ambiguous wire code.
 
 Proto3 scalars have no presence: `""`, `0`, and `false` are indistinguishable from unset.
 To distinguish "leave unchanged" from an explicit zero, use a message wrapper such as `*Thing`, a separate state flag, or an interpreted `bytes` payload.
-Optional scalars, `oneof`, enums, and well-known types such as timestamp and duration are unsupported.
+Optional scalars, `oneof`, enums, and other well-known types such as timestamp are unsupported.
 Use a Unix `int64` time, documented string enum-like values, or a `bytes` / JSON payload instead.
 There is no typed error schema: Go `error` crosses gRPC as a status, and each point documents its meaning, such as a veto.
 

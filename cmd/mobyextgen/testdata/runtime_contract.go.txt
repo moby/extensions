@@ -5,6 +5,7 @@ package contract
 
 import (
 	"context"
+	"time"
 
 	ext "github.com/moby/extensions"
 	stream "github.com/moby/extensions/stream"
@@ -20,7 +21,8 @@ type Service interface {
 }
 
 type Request struct {
-	Value int32 `pb:"1"`
+	Value int32         `pb:"1"`
+	Delay time.Duration `pb:"2"`
 }
 
 type Chunk struct {
@@ -29,7 +31,8 @@ type Chunk struct {
 }
 
 type Reply struct {
-	Values []int32 `pb:"1"`
+	Values []int32       `pb:"1"`
+	Delay  time.Duration `pb:"2"`
 }
 
 type AlternateReply struct {

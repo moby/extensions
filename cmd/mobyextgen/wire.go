@@ -44,6 +44,9 @@ func emitWire(pt point) ([]byte, error) {
 		fmt.Fprintln(&b, `	status "google.golang.org/grpc/status"`)
 	}
 	fmt.Fprintln(&b, `	grpc "google.golang.org/grpc"`)
+	if pt.usesDuration() {
+		fmt.Fprintln(&b, `	durationpb "google.golang.org/protobuf/types/known/durationpb"`)
+	}
 	fmt.Fprintln(&b, ")")
 
 	if pt.isPoint {
@@ -478,6 +481,8 @@ func emitConversions(b *strings.Builder, cpkg string, msg message) {
 		switch f.kind {
 		case scalarSingle, scalarRepeated, scalarMap:
 			fmt.Fprintf(b, "\tout.%s = in.%s\n", f.protoGoName, f.goName)
+		case durationSingle:
+			fmt.Fprintf(b, "\tout.%s = durationpb.New(in.%s)\n", f.protoGoName, f.goName)
 		case messageSingle:
 			fmt.Fprintf(b, "\tout.%s = %sToProto(in.%s)\n", f.protoGoName, lowerFirst(f.protoType), f.goName)
 		case messageRepeated:
@@ -494,6 +499,8 @@ func emitConversions(b *strings.Builder, cpkg string, msg message) {
 		switch f.kind {
 		case scalarSingle, scalarRepeated, scalarMap:
 			fmt.Fprintf(b, "\tout.%s = in.Get%s()\n", f.goName, f.protoGoName)
+		case durationSingle:
+			fmt.Fprintf(b, "\tout.%s = in.Get%s().AsDuration()\n", f.goName, f.protoGoName)
 		case messageSingle:
 			fmt.Fprintf(b, "\tout.%s = %sFromProto(in.Get%s())\n", f.goName, lowerFirst(f.protoType), f.protoGoName)
 		case messageRepeated:

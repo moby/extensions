@@ -19,6 +19,9 @@ func emitProto(pt point) ([]byte, error) {
 	fmt.Fprintln(&b, `syntax = "proto3";`)
 	fmt.Fprintln(&b)
 	fmt.Fprintf(&b, "package %s;\n\n", pt.id)
+	if pt.usesDuration() {
+		fmt.Fprintf(&b, "import %q;\n\n", durationProtoPath)
+	}
 	fmt.Fprintf(&b, "option go_package = %q;\n\n", pt.protogenImport())
 
 	emitComment(&b, "", pt.doc)
@@ -46,7 +49,7 @@ func emitProto(pt point) ([]byte, error) {
 				return nil, fmt.Errorf("%s.%s: field number %d is reserved", msg.name, f.protoName, f.number)
 			}
 			switch f.kind {
-			case scalarSingle, messageSingle:
+			case scalarSingle, messageSingle, durationSingle:
 				fmt.Fprintf(&b, "  %s %s = %d;\n", f.protoType, f.protoName, f.number)
 			case scalarRepeated, messageRepeated:
 				fmt.Fprintf(&b, "  repeated %s %s = %d;\n", f.protoType, f.protoName, f.number)

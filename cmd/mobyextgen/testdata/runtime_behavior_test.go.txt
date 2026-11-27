@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -56,7 +57,7 @@ func (p *provider) Unary(_ context.Context, req *contract.Request) (*contract.Re
 	if p.unaryErr != nil {
 		return nil, p.unaryErr
 	}
-	return &contract.Reply{Values: []int32{req.Value}}, nil
+	return &contract.Reply{Values: []int32{req.Value}, Delay: req.Delay}, nil
 }
 
 func (p *provider) Remove(context.Context, *contract.Request) error {
@@ -190,6 +191,11 @@ func runtimeModes() []runtimeMode {
 
 func start(t *testing.T, p *provider) contract.Service {
 	t.Helper()
+	return protogen.NewClient(startConn(t, p))
+}
+
+func startConn(t *testing.T, p *provider) *grpc.ClientConn {
+	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	assert.NilError(t, err)
 	server := grpc.NewServer()
@@ -215,7 +221,7 @@ func start(t *testing.T, p *provider) contract.Service {
 		server.Stop()
 		<-serveDone
 	})
-	return protogen.NewClient(conn)
+	return conn
 }
 
 func await(t *testing.T, signal <-chan struct{}) {
@@ -377,6 +383,23 @@ func TestUnaryAndBareError(t *testing.T) {
 	p.unaryErr = errors.Join(errors.New("wrapped cancellation"), context.Canceled)
 	_, err = client.Unary(context.Background(), &contract.Request{})
 	assert.Equal(t, status.Code(err), codes.Canceled)
+}
+
+func TestDurationRoundTrip(t *testing.T) {
+	t.Parallel()
+	conn := startConn(t, &provider{})
+	client := protogen.NewClient(conn)
+	for _, delay := range []time.Duration{0, time.Second + 1, -time.Second - 1, math.MinInt64, math.MaxInt64} {
+		reply, err := client.Unary(t.Context(), &contract.Request{Delay: delay})
+		assert.NilError(t, err)
+		assert.Equal(t, reply.Delay, delay)
+	}
+
+	// A protobuf caller can omit the field. The Go provider receives zero.
+	reply, err := protogen.NewServiceClient(conn).Unary(t.Context(), &protogen.Request{})
+	assert.NilError(t, err)
+	assert.Assert(t, reply.Delay != nil)
+	assert.Equal(t, reply.Delay.AsDuration(), time.Duration(0))
 }
 
 func TestDirectAndRemoteParity(t *testing.T) {

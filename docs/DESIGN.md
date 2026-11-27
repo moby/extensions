@@ -138,14 +138,15 @@ The same policy admits providers wired for internal Host use by ordinary Point I
 An `Allow` decision keeps the provider use, `Drop` omits it, and `Reject` fails Host construction while preserving its error cause.
 The zero result rejects as invalid or unspecified, and a typed nil `PointPolicyFunc` rejects with a generic cause.
 An offered-only process Point without Host client wiring is governed only by the servicev0 policy decision.
-The servicev0 marker is exempt from provider admission and controls publication of the extension's offered Points.
+The servicev0 marker goes through the same admission and is limited to offered Points whose providers policy kept.
+Admitted offers resolve through `servicev0.Point` for in-process and out-of-process extensions alike; the Host synthesizes the marker for a launched extension from its declaration.
 
 An out-of-process extension passes every ordinary provider's generated `ServerPoint` to `sdk.Main` or `Server.Register`.
 The SDK records service names under the ordinary Point and serializes offered Point IDs separately.
 The Host may omit `ClientPoint` wiring for an offered-only Point; add it when the daemon also calls that Point internally.
 
-For in-process offers, Host composition supplies generated adapters through `WithPointServers`.
-The Host resolves the implementation from the same extension, applies policy, and preflights daemon-reserved, process, and in-process service name collisions before registration.
+The embedder decides how to expose each offered Point.
+For an in-process offer, it resolves the provider from the same extension and serves it with the generated `ServerPoint`, for example through `servicegrpc.Register`.
 
 External callers use the generated client directly over an existing host or proxy connection:
 
@@ -154,12 +155,12 @@ client := greeterpb.NewClient(hostConn)
 reply, err := client.Greet(ctx, &greeterv0.HelloRequest{Name: "world"})
 ```
 
-For an out-of-process extension, the SDK registers generated services on the extension server and reports their fully qualified names.
-The daemon proxies matching calls by name and forwards the raw gRPC stream, including metadata and status.
+For an out-of-process extension, the SDK registers generated services on the extension server.
+The daemon routes the offered Point's proto package to the extension with `grpcproxy` and forwards the raw gRPC stream, including metadata and status.
 
-Generated service names are captured from generated registration, not listed manually.
+Generated service names are `<PointID>.<InterfaceName>`, so an offered Point's proto package is its Point ID.
 The extension must provide the shared publication point before publishing its service inventory.
-A name cannot collide with another extension or a service already served by the daemon; collision fails startup rather than shadowing the existing service.
+`grpcproxy.BuildRoutes` rejects a package or service that another backend or a reserved daemon service already occupies; collision fails startup rather than shadowing the existing service.
 
 The embedding application chooses the gRPC endpoint used for publication; the framework does not create a Docker API endpoint.
 An exposed service must enforce any access control it needs.

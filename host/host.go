@@ -760,5 +760,6 @@ func extensionFromHosted(hosted hostedExtension, providers map[extensions.PointI
 		provider := build(hosted.conn)
 		decl.Providers = append(decl.Providers, provider)
 	}
+
 	return extensions.New(decl), nil
 }

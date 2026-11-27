@@ -58,6 +58,7 @@ func TestDeclarationOfferProtocolRoundTrip(t *testing.T) {
 		ID: "org.example.extension.v1",
 		Providers: []sdkapi.PointDeclaration{
 			{ID: "org.example.api.v1"},
+			{ID: "org.mobyproject.extension.service.v0"},
 		},
 		OfferedPoints: []string{"org.example.api.v1"},
 		ProviderServices: []sdkapi.ProviderServices{

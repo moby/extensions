@@ -114,13 +114,22 @@ func ValidateServices(name string, points []extensions.PointID, services map[ext
 	return nil
 }
 
-// ValidateOffers rejects malformed, duplicate, unimplemented, and unserved
-// offered Points.
+// ValidateOffers requires the servicev0 provider for nonempty offers and
+// rejects malformed, duplicate, unimplemented, and unserved offered Points.
 func ValidateOffers(name string, points, offered []extensions.PointID, services map[extensions.PointID][]string) error {
+	if len(offered) == 0 {
+		return nil
+	}
+
 	declared := make(map[extensions.PointID]bool, len(points))
 	for _, point := range points {
 		declared[point] = true
 	}
+
+	if !declared[servicev0.Point.ID()] {
+		return fmt.Errorf("extension %q offered points without declaring provider %q", name, servicev0.Point.ID())
+	}
+
 	seen := make(map[extensions.PointID]bool, len(offered))
 	for _, point := range offered {
 		if err := extensions.ValidatePointID(point); err != nil {

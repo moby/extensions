@@ -139,7 +139,8 @@ An `Allow` decision keeps the provider use, `Drop` omits it, and `Reject` fails 
 The zero result rejects as invalid or unspecified, and a typed nil `PointPolicyFunc` rejects with a generic cause.
 An offered-only process Point without Host client wiring is governed only by the servicev0 policy decision.
 The servicev0 marker goes through the same admission and is limited to offered Points whose providers policy kept.
-Admitted offers resolve through `servicev0.Point` for in-process and out-of-process extensions alike; the Host synthesizes the marker for a launched extension from its declaration.
+Admitted offers resolve through `servicev0.Point` for in-process and out-of-process extensions alike.
+The Host rejects a launched extension's declaration if `OfferedPoints` is nonempty but `Providers` omits `servicev0.Point.ID()`.
 
 An out-of-process extension passes every ordinary provider's generated `ServerPoint` to `sdk.Main` or `Server.Register`.
 The SDK records service names under the ordinary Point and serializes offered Point IDs separately.
@@ -160,7 +161,6 @@ The daemon uses `Host.OfferedServices` to route the exact gRPC service names rep
 This also works for services registered in a proto package other than the Point ID and does not expose unrelated services in the same package.
 `grpcproxy` forwards the raw gRPC stream, including metadata and status.
 
-The extension must provide the shared publication point before publishing its service inventory.
 `grpcproxy.BuildRoutes` rejects a package or service that another backend or a reserved daemon service already occupies; collision fails startup rather than shadowing the existing service.
 
 The embedding application chooses the gRPC endpoint used for publication; the framework does not create a Docker API endpoint.

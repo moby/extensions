@@ -454,6 +454,26 @@ func TestServerStreamingInvalidProviderMessage(t *testing.T) {
 	assert.Equal(t, status.Code(err), codes.Internal)
 }
 
+type notFound struct{ error }
+
+func (notFound) NotFound() {}
+
+func TestProviderErrorClassAcrossRPCs(t *testing.T) {
+	t.Parallel()
+	missing := notFound{errors.New("record missing")}
+	client := start(t, &provider{unaryErr: missing, downloadErr: missing, uploadErr: missing, uploadRejectAfter: 1})
+
+	_, unaryErr := client.Unary(t.Context(), &contract.Request{})
+	downloadErr := client.Download(t.Context(), &contract.Request{}, &sink{})
+	_, uploadErr := client.Upload(t.Context(), &source{values: []*contract.Chunk{{Value: 1}}, last: io.EOF})
+	for _, err := range []error{unaryErr, downloadErr, uploadErr} {
+		var marker interface{ NotFound() }
+		assert.Error(t, err, "record missing")
+		assert.Equal(t, status.Code(err), codes.NotFound)
+		assert.Check(t, errors.As(err, &marker))
+	}
+}
+
 func TestDirectAndRemoteErrorIdentity(t *testing.T) {
 	for _, mode := range runtimeModes() {
 		t.Run(mode.name, func(t *testing.T) {
@@ -505,7 +525,7 @@ func TestDirectAndRemoteErrorIdentity(t *testing.T) {
 				if mode.name == "direct" {
 					assert.Equal(t, p.uploadObservedErr, sourceErr)
 				} else {
-					assert.Assert(t, p.uploadObservedErr != sourceErr)
+					assert.Check(t, errors.Is(p.uploadObservedErr, context.Canceled), "%#v", p.uploadObservedErr)
 				}
 			})
 		})

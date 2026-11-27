@@ -9,6 +9,7 @@ import (
 	extensions "github.com/moby/extensions"
 	clientpoint "github.com/moby/extensions/clientpoint"
 	mobyextcontract "github.com/moby/extensions/example/greeter/v0"
+	grpcerror "github.com/moby/extensions/grpcerror"
 	serverpoint "github.com/moby/extensions/serverpoint"
 	grpc "google.golang.org/grpc"
 )
@@ -97,6 +98,7 @@ func NewClient(conn grpc.ClientConnInterface) mobyextcontract.Greeter {
 }
 
 // grpcServer serves an implementation of the contract's Go interface.
+// It encodes error classes as gRPC status codes for grpcClient to restore.
 type grpcServer struct {
 	impl mobyextcontract.Greeter
 }
@@ -104,7 +106,7 @@ type grpcServer struct {
 func (s *grpcServer) Greet(ctx context.Context, req *HelloRequest) (*HelloReply, error) {
 	resp, err := s.impl.Greet(ctx, helloRequestFromProto(req))
 	if err != nil {
-		return nil, err
+		return nil, grpcerror.ToStatus(err)
 	}
 	return helloReplyToProto(resp), nil
 }
@@ -116,7 +118,7 @@ type grpcClient struct {
 func (c *grpcClient) Greet(ctx context.Context, req *mobyextcontract.HelloRequest) (*mobyextcontract.HelloReply, error) {
 	resp, err := c.client.Greet(ctx, helloRequestToProto(req))
 	if err != nil {
-		return nil, err
+		return nil, grpcerror.FromStatus(err)
 	}
 	return helloReplyFromProto(resp), nil
 }
